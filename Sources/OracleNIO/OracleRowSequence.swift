@@ -45,6 +45,16 @@ public struct OracleRowSequence: AsyncSequence {
             columns: self.columns
         )
     }
+
+    public func getColumns() -> [[String: Any]] {
+        return columns.map { col in
+            return [
+                "name": col.name,
+                "type": col.dataType.name,
+                "size": col.dataTypeSize
+            ]
+        }
+    }
 }
 
 extension OracleRowSequence {
