@@ -11,13 +11,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
-import NIOEmbedded
+import OracleNIO
 
-@testable import OracleNIO
-
-extension StatementResult {
-    init(value: Value) {
-        self.init(value: value, logger: OracleConnection.noopLogger)
-    }
+protocol IntegrationTest {
+    var connection: OracleConnection! { get set }
 }

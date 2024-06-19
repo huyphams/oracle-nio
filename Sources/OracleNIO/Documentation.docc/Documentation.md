@@ -35,16 +35,18 @@ Oracle Database 12.1 or later.
 - ``AuthenticationMode``
 - ``OracleAccessToken``
 - ``OracleServiceMethod``
+- ``OracleVersion``
 
 ### Querying
 
-- ``OracleQuery``
+- ``OracleStatement``
 - ``OracleBindings``
 - ``OracleRow``
 - ``OracleRowSequence``
 - ``OracleRandomAccessRow``
 - ``OracleCell``
-- ``QueryOptions``
+- ``OracleColumn``
+- ``StatementOptions``
 
 ### Encoding and Decoding
 
