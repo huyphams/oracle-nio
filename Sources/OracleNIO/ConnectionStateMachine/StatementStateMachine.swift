@@ -334,8 +334,25 @@ struct StatementStateMachine {
             switch self.state {
             case .commandComplete, .error, .drain:
                 return .wait  // stream has already finished
-            case .initialized(let context),
-                .describeInfoReceived(let context, _):
+            case .initialized(let context):
+              context.cursorID = error.cursorID ?? context.cursorID
+
+              self.avoidingStateMachineCoWVoid { state in
+                  state = .commandComplete
+              }
+
+              switch context.type {
+              case .query(let promise),
+                  .plsql(let promise),
+                  .dml(let promise),
+                  .ddl(let promise),
+                  .cursor(_, let promise),
+                  .plain(let promise):
+                  action = .succeedStatement(
+                      promise, .init(value: .noRows([]), logger: context.logger)
+                  )  // empty response
+              }
+            case .describeInfoReceived(let context, let describeInfo):
                 context.cursorID = error.cursorID ?? context.cursorID
 
                 self.avoidingStateMachineCoWVoid { state in
@@ -350,7 +367,7 @@ struct StatementStateMachine {
                     .cursor(_, let promise),
                     .plain(let promise):
                     action = .succeedStatement(
-                        promise, .init(value: .noRows, logger: context.logger)
+                        promise, .init(value: .noRows(describeInfo.columns), logger: context.logger)
                     )  // empty response
                 }
 
@@ -449,7 +466,7 @@ struct StatementStateMachine {
                     action = .succeedStatement(
                         promise,
                         StatementResult(
-                            value: .noRows, logger: context.logger
+                            value: .noRows([]), logger: context.logger
                         )
                     )
                 }
