@@ -110,7 +110,7 @@ final class StatementContext {
 
         // strip single/multiline comments and and strings from the sql
         var sql = statement.sql
-        if #available(macOS 13.0, *) {
+        if #available(macOS 13.0,  iOS 16.0, *) {
           sql = sql.replacing(/\/\*[\S\n ]+?\*\//, with: "")
           sql = sql.replacing(/\--.*(\n|$)/, with: "")
           sql = sql.replacing(/'[^']*'(?=(?:[^']*[^']*')*[^']*$)/, with: "")
