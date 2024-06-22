@@ -57,7 +57,7 @@ extension ByteBuffer: OracleDecodable {
         context: OracleDecodingContext<JSONDecoder>
     ) throws {
         switch type {
-        case .raw, .longRAW:
+        case .raw, .longRAW, .object:
             self = buffer
         default:
             throw OracleDecodingError.Code.typeMismatch
