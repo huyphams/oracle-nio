@@ -936,7 +936,7 @@ struct StatementStateMachine {
                 }
             } catch {
                 guard let error = error as? OracleSQLError else {
-                    preconditionFailure("Unexpected error: \(error)")
+                    return self.setAndFireError(OracleSQLError(code: .messageDecodingFailure))
                 }
                 return self.setAndFireError(error)
             }
