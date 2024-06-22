@@ -702,7 +702,7 @@ struct ConnectionStateMachine {
         switch self.state {
         case .statement(let statement):
             guard statement.isComplete else {
-              return .wait
+              return .closeConnection(nil)
             }
 
             self.state = .readyForStatement
