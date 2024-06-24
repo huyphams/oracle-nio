@@ -79,7 +79,7 @@ final class OracleEventsHandler: ChannelInboundHandler {
                 break
             }
         default:
-          break
+            context.fireUserInboundEventTriggered(event)
         }
     }
 
