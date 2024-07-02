@@ -12,17 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
-
-extension ByteBuffer {
-    mutating func readOSON() throws -> Any? {
-        guard let length = readUB4(), length > 0 else { return nil }
-        skipUB8()  // size (unused)
-        skipUB4()  // chunk size (unused)
-        let data = try self.throwingReadOracleSpecificLengthPrefixedSlice()
-        // lob locator (unused)
-        _ = try throwingReadOracleSpecificLengthPrefixedSlice()
-        var decoder = OSONDecoder()
-        return try decoder.decode(data)
-    }
+enum OracleFrontendMessage {
+    case connect
+    case fastAuth
+    case authPhaseTwo
+    case logoff
+    case close
 }

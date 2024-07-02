@@ -127,8 +127,54 @@ final class StatementStateMachineTests: XCTestCase {
             state.cancelStatementStream(),
             .forwardStreamError(
                 .statementCancelled, read: false, cursorID: nil, clientCancelled: true))
-        XCTAssertEqual(state.markerReceived(), .sendMarker)
+        XCTAssertEqual(state.markerReceived(), .sendMarker(read: false))
         XCTAssertEqual(state.backendErrorReceived(backendError), .fireEventReadyForStatement)
+    }
+
+    func testCancellationFiresRead() throws {
+        let promise = EmbeddedEventLoop().makePromise(of: OracleRowStream.self)
+        promise.fail(OracleSQLError.uncleanShutdown)  // we don't care about the error at all.
+        let query: OracleStatement = "SELECT 1 AS id FROM dual"
+        let queryContext = StatementContext(statement: query, promise: promise)
+
+        let describeInfo = DescribeInfo(columns: [
+            .init(
+                name: "ID",
+                dataType: .number,
+                dataTypeSize: 0,
+                precision: 11,
+                scale: 0,
+                bufferSize: 22,
+                nullsAllowed: true,
+                typeScheme: nil,
+                typeName: nil,
+                domainSchema: nil,
+                domainName: nil,
+                annotations: [:],
+                vectorDimensions: nil,
+                vectorFormat: nil
+            )
+        ])
+        let rowHeader = OracleBackendMessage.RowHeader()
+        let result = StatementResult(value: .describeInfo(describeInfo.columns))
+        let rowData = try Array(
+            hexString:
+                "05 c4 02 03 31 23 07 05 c4 02 03 31 23 08 01 06 04 bd 33 f6 cf 01 0f 01 03 00 00 00 00 01 01 00 01 0b 0b 80 00 00 00 3d 3c 3c 80 00 00 00 01 a3 00 04 01 01 01 04 01 02 00 00 00 01 03 00 03 00 00 00 00 00 00 00 00 00 00 00 00 03 00 01 01 00 00 00 00 00 01 02"
+                .replacingOccurrences(of: " ", with: ""))
+
+        var state = ConnectionStateMachine.readyForStatement()
+        XCTAssertEqual(
+            state.enqueue(task: .statement(queryContext)), .sendExecute(queryContext, nil))
+        XCTAssertEqual(state.describeInfoReceived(describeInfo), .wait)
+        XCTAssertEqual(state.rowHeaderReceived(rowHeader), .succeedStatement(promise, result))
+        XCTAssertEqual(
+            state.rowDataReceived(.init(slice: .init(bytes: rowData)), capabilities: .init()),
+            .sendFetch(queryContext))
+        XCTAssertEqual(
+            state.cancelStatementStream(),
+            .forwardStreamError(
+                .statementCancelled, read: false, cursorID: nil, clientCancelled: true))
+        XCTAssertEqual(state.statementStreamCancelled(), .sendMarker(read: true))
     }
 
     func testProcessVectorColumnDataRequestsMissingData() {
@@ -228,5 +274,55 @@ final class StatementStateMachineTests: XCTestCase {
                 bufferSize: 1,
                 capabilities: .init()
             ))
+    }
+
+    func testProcessLOBColumnDataRequestsMissingData() throws {
+        let state = StatementStateMachine(
+            statementContext: .init(statement: "")
+        )
+        let type = OracleDataType.blob
+
+        var buffer = ByteBuffer(bytes: [
+            1, 1,  // length
+            1, 1,  // size
+            1, 1,  // chunk size
+            2, 0,  // locator (partial)
+        ])
+        try XCTAssertNil(
+            state.processColumnData(
+                from: &buffer,
+                oracleType: type._oracleType,
+                csfrm: type.csfrm,
+                bufferSize: 1,
+                capabilities: .init()
+            )
+        )
+
+        buffer = ByteBuffer(bytes: [
+            1, 1,  // length
+            1, 1,  // size
+            1, 1,  // chunk size
+            1, 0,  // locator
+        ])
+        try XCTAssertNotNil(
+            state.processColumnData(
+                from: &buffer,
+                oracleType: type._oracleType,
+                csfrm: type.csfrm,
+                bufferSize: 1,
+                capabilities: .init()
+            )
+        )
+
+        buffer = ByteBuffer(bytes: [0])
+        try XCTAssertNotNil(
+            state.processColumnData(
+                from: &buffer,
+                oracleType: type._oracleType,
+                csfrm: type.csfrm,
+                bufferSize: 1,
+                capabilities: .init()
+            )
+        )
     }
 }
