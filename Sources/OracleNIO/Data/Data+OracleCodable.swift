@@ -61,7 +61,7 @@ extension Data: OracleDecodable {
         context: OracleDecodingContext<JSONDecoder>
     ) throws {
         switch type {
-        case .raw, .longRAW:
+        case .raw, .longRAW, .varchar, .char, .long, .nVarchar, .longNVarchar:
             self = buffer.readData(length: buffer.readableBytes) ?? .init()
         default:
             throw OracleDecodingError.Code.typeMismatch
