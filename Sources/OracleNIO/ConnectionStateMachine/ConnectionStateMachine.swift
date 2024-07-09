@@ -134,7 +134,6 @@ struct ConnectionStateMachine {
             EventLoopPromise<OracleRowStream>,
             StatementResult
         )
-        case needMoreData
 
         // Statement streaming
         case forwardRows([DataRow])
@@ -750,29 +749,6 @@ struct ConnectionStateMachine {
         }
     }
 
-    mutating func chunkReceived(
-        _ buffer: ByteBuffer, capabilities: Capabilities
-    ) -> ConnectionAction {
-        switch self.state {
-        case .statement(var statement):
-            return self.avoidingStateMachineCoW { machine in
-                let action = statement.chunkReceived(
-                    buffer, capabilities: capabilities
-                )
-                machine.state = .statement(statement)
-                return machine.modify(with: action)
-            }
-
-        case .loggingOff, .closing:
-            // Might happen if an error is thrown in row decoding and the
-            // connection is closed immediately after.
-            return .wait
-
-        default:
-            preconditionFailure("Invalid state: \(self.state)")
-        }
-    }
-
     mutating func ioVectorReceived(
         _ vector: OracleBackendMessage.InOutVector
     ) -> ConnectionAction {
@@ -918,7 +894,6 @@ struct ConnectionStateMachine {
                 .sendFetch,
                 .sendFlushOutBinds,
                 .succeedStatement,
-                .needMoreData,
                 .forwardRows,
                 .forwardStreamComplete,
                 .forwardCancelComplete,
@@ -1169,8 +1144,6 @@ extension ConnectionStateMachine {
             return .failStatement(promise, with: error, cleanupContext: nil)
         case .succeedStatement(let promise, let columns):
             return .succeedStatement(promise, columns)
-        case .needMoreData:
-            return .needMoreData
         case .forwardRows(let rows):
             return .forwardRows(rows)
         case .forwardStreamComplete(let rows, let cursorID):
