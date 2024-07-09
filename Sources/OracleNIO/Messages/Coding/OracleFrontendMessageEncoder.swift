@@ -354,6 +354,7 @@ struct OracleFrontendMessageEncoder {
                 self.writeKeyValuePair(key: "AUTH_TOKEN", value: token)
             case .tokenAndPrivateKey(let token, let key):
                 self.writeKeyValuePair(key: "AUTH_TOKEN", value: token)
+              if #available(macOS 12,  iOS 15.0, *) {
                 let now = authHeaderDateFormatter.string(from: .now)
                 let hostInfo = """
                     \(authContext.peerAddress?.ipAddress ?? ""):\
@@ -372,6 +373,7 @@ struct OracleFrontendMessageEncoder {
                 let signature = try getSignature(key: key, payload: header)
                 self.writeKeyValuePair(key: "AUTH_HEADER", value: header)
                 self.writeKeyValuePair(key: "AUTH_SIGNATURE", value: signature)
+              }
             }
 
         case .usernamePassword(_, let password, let newPassword):

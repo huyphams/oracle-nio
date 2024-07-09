@@ -728,10 +728,7 @@ struct ConnectionStateMachine {
         switch self.state {
         case .statement(let statement):
             guard statement.isComplete else {
-                preconditionFailure(
-                    """
-                    readyForStatement received when statement is still being executed
-                    """)
+              return .closeConnection(nil)
             }
 
             self.state = .readyForStatement
