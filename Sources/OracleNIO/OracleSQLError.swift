@@ -219,6 +219,10 @@ public struct OracleSQLError: Sendable, Error {
             self.underlying.message
         }
 
+        public var position: UInt16? {
+            self.underlying.position
+        }
+
         init(_ underlying: OracleBackendMessage.BackendError) {
             self.underlying = underlying
         }
