@@ -43,6 +43,7 @@ import _ConnectionPoolModule
 /// ``OracleClient`` can not lease connections, if its ``run()`` method isn't active. Cancelling
 /// the ``run()`` method is equivalent to closing the client. Once a client's ``run()`` method has
 /// been cancelled, executing queries will fail.
+@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 public final class OracleClient: Sendable, Service {
     /// Describes general client behavior options. Those settings are considered advanced options.
     public struct Options: Sendable {
@@ -219,7 +220,7 @@ public final class OracleClient: Sendable, Service {
     }
 }
 
-
+@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 struct OracleKeepAliveBehavior: ConnectionKeepAliveBehavior {
     let behaviour: OracleClient.Options.KeepAliveBehavior?
     let logger: Logger
@@ -238,6 +239,7 @@ struct OracleKeepAliveBehavior: ConnectionKeepAliveBehavior {
     }
 }
 
+@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension ConnectionPoolConfiguration {
     init(_ options: OracleClient.Options) {
         self = ConnectionPoolConfiguration()

@@ -353,24 +353,26 @@ struct OracleFrontendMessageEncoder {
                 self.writeKeyValuePair(key: "AUTH_TOKEN", value: token)
             case .tokenAndPrivateKey(let token, let key):
                 self.writeKeyValuePair(key: "AUTH_TOKEN", value: token)
-                let now = authHeaderDateFormatter.string(from: .now)
-                let hostInfo = """
-                    \(authContext.peerAddress?.ipAddress ?? ""):\
-                    \(authContext.peerAddress?.port ?? 0)
-                    """
-                guard
-                    case .serviceName(let serviceName) = authContext.service
-                else {
-                    throw OracleSQLError.sidNotSupported
+                if #available(macOS 13,  iOS 16.0, *) {
+                    let now = authHeaderDateFormatter.string(from: .now)
+                    let hostInfo = """
+                        \(authContext.peerAddress?.ipAddress ?? ""):\
+                        \(authContext.peerAddress?.port ?? 0)
+                        """
+                    guard
+                      case .serviceName(let serviceName) = authContext.service
+                    else {
+                      throw OracleSQLError.sidNotSupported
+                    }
+                    let header = """
+                        date: \(now)
+                        (request-target): \(serviceName)
+                        host: \(hostInfo)
+                        """
+                    let signature = try getSignature(key: key, payload: header)
+                    self.writeKeyValuePair(key: "AUTH_HEADER", value: header)
+                    self.writeKeyValuePair(key: "AUTH_SIGNATURE", value: signature)
                 }
-                let header = """
-                    date: \(now)
-                    (request-target): \(serviceName)
-                    host: \(hostInfo)
-                    """
-                let signature = try getSignature(key: key, payload: header)
-                self.writeKeyValuePair(key: "AUTH_HEADER", value: header)
-                self.writeKeyValuePair(key: "AUTH_SIGNATURE", value: signature)
             }
 
         case .usernamePassword(_, let password, let newPassword):
