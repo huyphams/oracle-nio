@@ -303,8 +303,7 @@ struct StatementStateMachine {
             case .commandComplete, .error, .drain:
                 return .wait  // stream has already finished
 
-            case .initialized(let context),
-                .describeInfoReceived(let context, _):
+            case .initialized(let context):
                 self.avoidingStateMachineCoWVoid { state in
                     state = .commandComplete
                 }
@@ -319,7 +318,7 @@ struct StatementStateMachine {
                     action = .succeedStatement(
                         promise,
                         .init(
-                            value: .noRows(affectedRows: Int(error.rowCount ?? 0)),
+                            value: .noRows(affectedRows: Int(error.rowCount ?? 0), columns: []),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: nil,
@@ -327,7 +326,29 @@ struct StatementStateMachine {
                         )
                     )  // empty response
                 }
+            case .describeInfoReceived(let context, let describeInfo):
+                self.avoidingStateMachineCoWVoid { state in
+                    state = .commandComplete
+                }
 
+                switch context.type {
+                case .query(let promise),
+                    .plsql(let promise),
+                    .dml(let promise),
+                    .ddl(let promise),
+                    .cursor(_, let promise),
+                    .plain(let promise):
+                    action = .succeedStatement(
+                        promise,
+                        .init(
+                            value: .noRows(affectedRows: Int(error.rowCount ?? 0), columns: describeInfo.columns),
+                            logger: context.logger,
+                            batchErrors: batchErrors,
+                            rowCounts: nil,
+                            cursorID: error.cursorID
+                        )
+                    )  // empty response
+                }
             case .rowCountsReceived(let context, let rowCounts):
                 self.avoidingStateMachineCoWVoid { state in
                     state = .commandComplete
@@ -343,7 +364,7 @@ struct StatementStateMachine {
                     action = .succeedStatement(
                         promise,
                         .init(
-                            value: .noRows(affectedRows: Int(error.rowCount ?? 0)),
+                            value: .noRows(affectedRows: Int(error.rowCount ?? 0), columns: []),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: rowCounts,
@@ -445,7 +466,7 @@ struct StatementStateMachine {
                     action = .succeedStatement(
                         promise,
                         StatementResult(
-                            value: .noRows(affectedRows: Int(error.rowCount ?? 0)),
+                            value: .noRows(affectedRows: Int(error.rowCount ?? 0), columns: []),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: nil,
@@ -466,7 +487,7 @@ struct StatementStateMachine {
                     action = .succeedStatement(
                         promise,
                         StatementResult(
-                            value: .noRows(affectedRows: Int(error.rowCount ?? 0)),
+                            value: .noRows(affectedRows: Int(error.rowCount ?? 0), columns: []),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: rowCounts,
