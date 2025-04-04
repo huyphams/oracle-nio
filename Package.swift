@@ -7,7 +7,7 @@ import PackageDescription
 
 let package = Package(
     name: "oracle-nio",
-    platforms: [.macOS(.v13), .iOS(.v16), .tvOS(.v16), .watchOS(.v9), .visionOS(.v1)],
+    platforms: [.macOS(.v10_15), .iOS(.v13), .tvOS(.v16), .watchOS(.v9), .visionOS(.v1)],
     products: [
         .library(name: "OracleNIO", targets: ["OracleNIO"]),
         .library(name: "OracleNIOMacros", targets: ["OracleNIOMacros"]),

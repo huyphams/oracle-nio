@@ -200,10 +200,11 @@ final class StatementContext: Sendable {
 
         // strip single/multiline comments and and strings from the sql
         var sql = statement.sql
+      if #available(macOS 13.0,  iOS 16.0, *) {
         sql = sql.replacing(/\/\*[\S\n ]+?\*\//, with: "")
         sql = sql.replacing(/\--.*(\n|$)/, with: "")
         sql = sql.replacing(/'[^']*'(?=(?:[^']*[^']*')*[^']*$)/, with: "")
-
+      }
         self.isReturning = statement.binds.metadata.first(where: \.isReturnBind) != nil
         let type = Self.determineStatementType(minifiedSQL: sql, promise: promise)
         self.type = type
@@ -226,10 +227,11 @@ final class StatementContext: Sendable {
 
         // strip single/multiline comments and and strings from the sql
         var sql = statement
+      if #available(macOS 13.0,  iOS 16.0, *) {
         sql = sql.replacing(/\/\*[\S\n ]+?\*\//, with: "")
         sql = sql.replacing(/\--.*(\n|$)/, with: "")
         sql = sql.replacing(/'[^']*'(?=(?:[^']*[^']*')*[^']*$)/, with: "")
-
+      }
         self.isReturning =
             bindCollection.metadata.first(where: \.isReturnBind) != nil
         let type = Self.determineStatementType(minifiedSQL: sql, promise: promise)

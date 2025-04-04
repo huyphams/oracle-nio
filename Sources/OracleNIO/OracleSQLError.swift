@@ -228,6 +228,10 @@ public struct OracleSQLError: Sendable, Error {
             self.underlying.message
         }
 
+        public var position: UInt16? {
+            self.underlying.position
+        }
+
         /// The amount of rows affected by the operation.
         ///
         /// In most cases, this is `0`, although it is posslbe that a statement

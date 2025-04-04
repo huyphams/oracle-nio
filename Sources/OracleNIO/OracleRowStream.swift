@@ -18,7 +18,7 @@ import NIOCore
 
 struct StatementResult {
     enum Value: Equatable {
-        case noRows(affectedRows: Int)
+        case noRows(affectedRows: Int, columns: [OracleColumn])
         case describeInfo([OracleColumn])
     }
 
@@ -37,7 +37,7 @@ final class OracleRowStream: @unchecked Sendable {
 
     enum Source {
         case stream([OracleColumn], OracleRowsDataSource)
-        case noRows(Result<Void, Error>)
+        case noRows(Result<Void, Error>, [OracleColumn])
     }
 
     let eventLoop: EventLoop
@@ -145,11 +145,11 @@ final class OracleRowStream: @unchecked Sendable {
         case .stream(let rowDescription, let dataSource):
             self.rowDescription = rowDescription
             bufferState = .streaming(buffer: .init(), dataSource: dataSource)
-        case .noRows(.success):
-            self.rowDescription = []
+        case .noRows(.success, let columns):
+            self.rowDescription = columns
             bufferState = .finished(buffer: .init())
-        case .noRows(.failure(let error)):
-            self.rowDescription = []
+        case .noRows(.failure(let error), let columns):
+            self.rowDescription = columns
             bufferState = .failure(error)
         }
 

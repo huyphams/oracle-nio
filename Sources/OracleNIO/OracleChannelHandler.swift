@@ -735,9 +735,9 @@ final class OracleChannelHandler: ChannelDuplexHandler {
             self.rowStream = rows
             promise.succeed(rows)
 
-        case .noRows(let affectedRows):
+        case .noRows(let affectedRows, let columns):
             rows = OracleRowStream(
-                source: .noRows(.success(())),
+                source: .noRows(.success(()), columns),
                 eventLoop: context.channel.eventLoop,
                 logger: result.logger,
                 affectedRows: affectedRows,
