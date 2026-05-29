@@ -12,17 +12,27 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
+public import NIOCore
 
-import struct Foundation.Calendar
-import struct Foundation.Date
-import struct Foundation.DateComponents
-import struct Foundation.TimeZone
-import func Foundation.pow
+#if canImport(Darwin)
+    public import Darwin
+#elseif canImport(Glibc)
+    public import Glibc
+#elseif canImport(Musl)
+    public import Musl
+#endif
+
+#if canImport(FoundationEssentials)
+    public import FoundationEssentials
+#else
+    public import Foundation
+#endif
 
 extension Date: OracleEncodable {
+    @inlinable
     public static var defaultOracleType: OracleDataType { .timestampTZ }
 
+    @inlinable
     public func encode(
         into buffer: inout ByteBuffer,
         context: OracleEncodingContext
@@ -60,13 +70,14 @@ extension Date: OracleEncodable {
             let totalMinutes = seconds / 60
             let hours = totalMinutes / 60
             let minutes = totalMinutes % 60
-            buffer.writeInteger(UInt8(hours) + Constants.TZ_HOUR_OFFSET)
-            buffer.writeInteger(UInt8(minutes) + Constants.TZ_MINUTE_OFFSET)
+            buffer.writeInteger(UInt8(hours + Constants.TZ_HOUR_OFFSET))
+            buffer.writeInteger(UInt8(minutes + Constants.TZ_MINUTE_OFFSET))
         }
     }
 }
 
 extension Date: OracleDecodable {
+    @inlinable
     public init(
         from buffer: inout ByteBuffer,
         type: OracleDataType,
@@ -112,8 +123,8 @@ extension Date: OracleDecodable {
                     throw OracleDecodingError.Code.failure
                 }
 
-                let tzHour = Int(byte11 - Constants.TZ_HOUR_OFFSET)
-                let tzMinute = Int(byte12 - Constants.TZ_MINUTE_OFFSET)
+                let tzHour = numericCast(byte11) - Constants.TZ_HOUR_OFFSET
+                let tzMinute = numericCast(byte12) - Constants.TZ_MINUTE_OFFSET
                 if tzHour != 0 || tzMinute != 0 {
                     guard
                         let timeZone = TimeZone(

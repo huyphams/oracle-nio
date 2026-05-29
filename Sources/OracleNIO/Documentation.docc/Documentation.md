@@ -30,6 +30,8 @@ Oracle Database 12.1 or later.
 ### Connections
 
 - ``OracleConnection``
+- ``OracleTransactionConnection``
+- ``OracleConnectionProtocol``
 - ``OracleClient``
 - ``OracleAuthenticationMethod``
 - ``AuthenticationMode``
@@ -46,9 +48,9 @@ Oracle Database 12.1 or later.
 - ``OracleRandomAccessRow``
 - ``OracleCell``
 - ``OracleColumn``
+- ``OracleColumns``
 - ``StatementOptions``
 - ``OraclePreparedStatement``
-- ``Statement(_:)``
 - ``OracleBatchExecutionResult``
 
 ### Encoding and Decoding
@@ -59,6 +61,7 @@ Oracle Database 12.1 or later.
 - ``OracleEncodable``
 - ``OracleEncodingContext``
 - ``OracleDecodable``
+- ``OracleNonCopyableDecodable``
 - ``OracleDecodingContext``
 - ``OracleCodable``
 - ``OracleDataType``
@@ -69,6 +72,7 @@ Oracle Database 12.1 or later.
 - ``RowID``
 - ``IntervalDS``
 - ``OracleJSON``
+- ``OracleXML``
 - ``OracleVectorProtocol``
 - ``OracleVectorBinary``
 - ``OracleVectorInt8``
@@ -80,4 +84,5 @@ Oracle Database 12.1 or later.
 
 - ``OracleSQLError``
 - ``OracleDecodingError``
+- ``OracleTransactionError``
 - ``OracleBatchExecutionError``

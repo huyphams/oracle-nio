@@ -12,8 +12,8 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOConcurrencyHelpers
-import NIOCore
+public import NIOConcurrencyHelpers
+public import NIOCore
 
 /// A reference type used to capture `OUT` and `IN/OUT` binds in `DML` returning statements or
 /// `PL/SQL`.
@@ -57,6 +57,7 @@ import NIOCore
 /// ```
 ///
 public final class OracleRef: Sendable, Hashable {
+    @inlinable
     public static func == (lhs: OracleRef, rhs: OracleRef) -> Bool {
         lhs.storage.withLockedValue { lhs in
             rhs.storage.withLockedValue { rhs in
@@ -65,6 +66,7 @@ public final class OracleRef: Sendable, Hashable {
         }
     }
 
+    @inlinable
     public func hash(into hasher: inout Hasher) {
         self.storage.withLockedValue { hasher.combine($0) }
     }
@@ -80,16 +82,13 @@ public final class OracleRef: Sendable, Hashable {
     /// after completing the statement (using ``decode(of:)``).
     ///
     /// - Parameter dataType: The desired datatype within the Oracle database.
-    /// - Parameter isReturnBind: Set this to `true` if the bind is used as part of a DML
-    ///                           statement in the `RETURNING ... INTO binds` where
-    ///                           binds are x `OracleRef`'s.
-    public init(dataType: OracleDataType, isReturnBind: Bool = false) {
+    @inlinable
+    public init(dataType: OracleDataType) {
         self.storage = NIOLockedValueBox(nil)
         self.metadata = NIOLockedValueBox(
             .init(
                 dataType: dataType,
                 protected: false,
-                isReturnBind: isReturnBind,
                 isArray: false,
                 arrayCount: nil,
                 maxArraySize: nil,
@@ -99,26 +98,22 @@ public final class OracleRef: Sendable, Hashable {
 
     /// Use this initializer to create an IN/OUT bind.
     /// - Parameter value: The initial value of the bind.
+    @inlinable
     public init<V: OracleThrowingDynamicTypeEncodable>(_ value: V) throws {
         var storage = ByteBuffer()
         try value._encodeRaw(into: &storage, context: .default)
         self.storage = NIOLockedValueBox(storage)
-        self.metadata = NIOLockedValueBox(
-            .init(
-                value: value, protected: true, isReturnBind: false, bindName: nil
-            ))
+        self.metadata = NIOLockedValueBox(.init(value: value, protected: true, bindName: nil))
     }
 
     /// Use this initializer to create a IN/OUT bind.
     /// - Parameter value: The initial value of the bind.
+    @inlinable
     public init<V: OracleEncodable>(_ value: V) {
         var storage = ByteBuffer()
         value._encodeRaw(into: &storage, context: .default)
         self.storage = NIOLockedValueBox(storage)
-        self.metadata = NIOLockedValueBox(
-            .init(
-                value: value, protected: true, isReturnBind: false, bindName: nil
-            ))
+        self.metadata = NIOLockedValueBox(.init(value: value, protected: true, bindName: nil))
     }
 
     /// Decodes a value of the given type from the bind.
@@ -126,10 +121,36 @@ public final class OracleRef: Sendable, Hashable {
     /// This method uses the ``OracleDecodable/init(from:type:context:)`` to decode
     /// the value internally.
     ///
-    /// - Parameter of: The type of the returned value.
+    /// - Parameter as: The type of the returned value.
     /// - Returns: A value of the specified type.
-    public func decode<V: OracleDecodable>(of: V.Type = V.self) throws -> V {
+    @inlinable
+    public func decode<V: OracleDecodable>(as: V.Type = V.self) throws -> V {
         var buffer: ByteBuffer?
+        self.readStorage(&buffer)
+        return try self.metadata.withLockedValue { metadata in
+            try V._decodeRaw(
+                from: &buffer, type: metadata.dataType, context: .default
+            )
+        }
+    }
+
+    /// Decodes a value of the given type from the bind.
+    ///
+    /// This method uses the ``OracleNonCopyableDecodable/init(from:type:context:)`` to decode
+    /// the value internally.
+    ///
+    /// - Parameter as: The type of the returned value.
+    /// - Returns: A value of the specified type.
+    @inlinable
+    public func decode<V: OracleNonCopyableDecodable & ~Copyable>(as: V.Type = V.self) throws -> V {
+        var buffer: ByteBuffer?
+        self.readStorage(&buffer)
+        let dataType = self.metadata.withLockedValue { metadata in metadata.dataType }
+        return try V._decodeRaw(from: &buffer, type: dataType, context: .default)
+    }
+
+    @inlinable
+    func readStorage(_ buffer: inout ByteBuffer?) {
         self.storage.withLockedValue { storage in
             let length = Int(storage?.getInteger(at: 0, as: UInt8.self) ?? 0)
 
@@ -152,11 +173,6 @@ public final class OracleRef: Sendable, Hashable {
                     at: MemoryLayout<UInt8>.size, length: length
                 )!
             }
-        }
-        return try self.metadata.withLockedValue { metadata in
-            try V._decodeRaw(
-                from: &buffer, type: metadata.dataType, context: .default
-            )
         }
     }
 }

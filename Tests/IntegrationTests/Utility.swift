@@ -12,16 +12,16 @@
 //
 //===----------------------------------------------------------------------===//
 
+import Atomics
+import Foundation
 import Logging
 import NIOCore
 import NIOSSL
 import OracleNIO
 
-import func Foundation.getenv
+extension OracleConnection.Configuration {
 
-extension OracleConnection {
-
-    static func testConfig() throws -> OracleConnection.Configuration {
+    static func test() throws -> OracleConnection.Configuration {
 
         var config = OracleConnection.Configuration(
             host: env("ORA_HOSTNAME") ?? "192.168.1.24",
@@ -31,9 +31,10 @@ extension OracleConnection {
             password: env("ORA_PASSWORD") ?? "my_passwor"
         )
 
-        if let wallet = env("ORA_TEST_WALLET")?.data(using: .utf8).flatMap(Array.init),
+        if let wallet = env("ORA_TEST_WALLET")?.utf8,
             let walletPassword = env("ORA_TEST_WALLET_PASSWORD")
         {
+            let wallet = Array(wallet)
             let key = try NIOSSLPrivateKey(bytes: wallet, format: .pem) { completion in
                 completion(walletPassword.utf8)
             }
@@ -50,8 +51,8 @@ extension OracleConnection {
         return config
     }
 
-    static func privilegedTestConfig() throws -> OracleConnection.Configuration {
-        var config = try self.testConfig()
+    static func privilegedTest() throws -> OracleConnection.Configuration {
+        var config = try self.test()
         config.authenticationMethod = {
             .init(
                 username: "SYS",
@@ -60,18 +61,27 @@ extension OracleConnection {
         config.mode = .sysDBA
         return config
     }
+}
 
+extension OracleConnection {
     static func test(
-        on eventLoop: EventLoop = OracleConnection.defaultEventLoopGroup.any(),
+        on eventLoop: EventLoop? = nil,
         config: OracleConnection.Configuration? = nil,
         logLevel: Logger.Level = Logger.getLogLevel()
     ) async throws -> OracleConnection {
         var logger = Logger(label: "oracle.connection.test")
         logger.logLevel = logLevel
 
+        if let eventLoop {
+            return try await OracleConnection.connect(
+                on: eventLoop,
+                configuration: config ?? .test(),
+                id: 0,
+                logger: logger
+            )
+        }
         return try await OracleConnection.connect(
-            on: eventLoop,
-            configuration: config ?? self.testConfig(),
+            configuration: config ?? .test(),
             id: 0,
             logger: logger
         )
@@ -99,4 +109,31 @@ extension Logger {
 
 func env(_ name: String) -> String? {
     getenv(name).flatMap { String(cString: $0) }
+}
+
+let connectionIDGenerator = ManagedAtomic(0)
+
+func withOracleConnection<Result>(
+    on eventLoop: EventLoop,
+    configuration: OracleConnection.Configuration? = nil,
+    _ closure: (OracleConnection) async throws -> Result
+) async throws -> Result {
+    let connectionID = connectionIDGenerator.wrappingIncrementThenLoad(ordering: .relaxed)
+    var logger = Logger(label: "oracle.connection.test")
+    logger.logLevel = Logger.getLogLevel()
+    let connection = try await OracleConnection.connect(
+        on: eventLoop,
+        configuration: configuration ?? .test(),
+        id: connectionID,
+        logger: logger
+    )
+
+    do {
+        let result = try await closure(connection)
+        try await connection.close()
+        return result
+    } catch {
+        try await connection.close()
+        throw error
+    }
 }

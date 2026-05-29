@@ -12,14 +12,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
+public import NIOCore
 import NIOPosix
-import NIOSSL
+public import NIOSSL
 
-import struct Foundation.Data
-import class Foundation.ProcessInfo
-import struct Foundation.TimeZone
-import struct Foundation.URL
+#if canImport(FoundationEssentials)
+    public import FoundationEssentials
+#else
+    public import Foundation
+#endif
+
+#if DistributedTracingSupport
+    public import Tracing
+#endif
 
 extension OracleConnection {
     /// A configuration object for a connection.
@@ -31,16 +36,19 @@ extension OracleConnection {
         public struct TLS: Sendable {
 
             /// Do not try to create a TLS connection to the server.
-            public static var disable: Self { .init(base: .disable) }
+            @inlinable
+            public static var disable: Self { .init(.disable) }
 
             /// Try to create a TLS connection to the server.
             ///
             /// If the server supports TLS, create a TLS connection. If the server does not support TLS,
             /// fail the connection creation.
+            @inlinable
             public static func require(_ sslContext: NIOSSLContext) -> Self {
-                self.init(base: .require(sslContext))
+                self.init(.require(sslContext))
             }
 
+            @inlinable
             public var sslContext: NIOSSLContext? {
                 switch self.base {
                 case .disable: return nil
@@ -48,12 +56,16 @@ extension OracleConnection {
                 }
             }
 
-            enum Base {
+            @usableFromInline
+            enum Base: Sendable {
                 case disable
                 case require(NIOSSLContext)
             }
+            @usableFromInline
             let base: Base
-            private init(base: Base) { self.base = base }
+
+            @usableFromInline
+            init(_ base: Base) { self.base = base }
         }
 
         // MARK: - Underlying connection options
@@ -272,6 +284,18 @@ extension OracleConnection {
         }
         internal let _terminalName = "unknown"
 
+        #if DistributedTracingSupport
+            /// The distributed tracing configuration to use for this connection.
+            /// Defaults to using the globally bootstrapped tracer with OpenTelementry
+            /// semantic conventions.
+            public var tracing: OracleTracingConfiguration = .init()
+        #endif
+
+        #if _IOTracing
+            /// Enables tracing for all I/O within the connection.
+            /// **Might be changed or removed any time**
+            public var _ioTracingEnabled: Bool? = nil
+        #endif
 
         // MARK: - Connection Pooling
         internal var purity: Purity = .default
@@ -392,28 +416,35 @@ extension String {
 }
 
 private func sanitize(value: String) -> String {
-    return
-        value
+    return value
         .replacingOccurrences(of: "(", with: "?")
         .replacingOccurrences(of: ")", with: "?")
         .replacingOccurrences(of: "=", with: "?")
 }
 
-public enum OracleAccessToken: Equatable {
-    /// Specifies an Azure AD OAuth2 token used for Open Authorization (OAuth 2.0) token
-    /// based authentication.
-    case oAuth2(String)
+public struct OracleAccessToken: Sendable, Equatable {
+    let base: Base
+
+    enum Base: Sendable, Equatable {
+        case oAuth2(String)
+        case tokenAndPrivateKey(token: String, key: String)
+    }
+
+    /// Allows to use OAuth 2.0 tokens managed in a Microsoft Entry ID service.
+    public static func oAuth2(with token: String) -> OracleAccessToken {
+        self.init(base: .oAuth2(token))
+    }
     /// Specifies the token and private key strings used for Oracle Cloud Infrastructure (OCI)
     /// Identity and Access Management (IAM) token based authentication.
-    case tokenAndPrivateKey(token: String, key: String)
+    public static func tokenAndPrivateKey(token: String, key: String) -> OracleAccessToken {
+        self.init(base: .tokenAndPrivateKey(token: token, key: key))
+    }
 }
 
-public struct OracleAuthenticationMethod:
-    Equatable, CustomDebugStringConvertible
-{
-    var base: Base
+public struct OracleAuthenticationMethod: Sendable, Equatable, CustomDebugStringConvertible {
+    let base: Base
 
-    enum Base: Equatable {
+    enum Base: Sendable, Equatable {
         case usernamePassword(String, String, String?)
         case token(OracleAccessToken)
     }
@@ -440,22 +471,71 @@ public struct OracleAuthenticationMethod:
         switch self.base {
         case .usernamePassword(let username, _, let newPassword):
             return """
-                OracleAuthenticationVariant(username: \(String(reflecting: username)), \
+                OracleAuthenticationMethod(username: \(String(reflecting: username)), \
                 password: ********, \
                 newPassword: \(newPassword != nil ? "********" : "nil"))
                 """
         case .token:
-            return "OracleAuthenticationVariant(token: ********)"
+            return "OracleAuthenticationMethod(token: ********)"
         }
     }
 
 }
 
-public enum OracleServiceMethod: Sendable, Equatable {
+public struct OracleServiceMethod: Sendable, Equatable {
+    let base: Base
+
+    enum Base: Sendable, Equatable {
+        case serviceName(String)
+        case sid(String)
+    }
+
     /// The service name of the database.
-    case serviceName(String)
+    public static func serviceName(_ value: String) -> OracleServiceMethod {
+        self.init(base: .serviceName(value))
+    }
+
     /// The system identifier (SID) of the database.
     ///
     /// - Note: Using a ``serviceName(_:)`` instead is recommended by Oracle.
-    case sid(String)
+    public static func sid(_ value: String) -> OracleServiceMethod {
+        self.init(base: .sid(value))
+    }
 }
+
+#if DistributedTracingSupport
+    /// A configuration object that defines distributed tracing behavior of an Oracle connection.
+    public struct OracleTracingConfiguration: Sendable {
+        /// The tracer to use, or `nil` to disable tracing.
+        /// Defaults to the globally bootstrapped tracer.
+        public var tracer: (any Tracer)? = InstrumentationSystem.tracer
+
+        /// The attribute names used in spans created by OracleNIO. Defaults to OpenTelemetry semantics.
+        public var attributeNames: AttributeNames = .init()
+
+        /// The static attribute values used in spans created by OracleNIO.
+        public var attributeValues: AttributeValues = .init()
+
+        /// Attribute names used in spans created by OracleNIO.
+        public struct AttributeNames: Sendable {
+            public var databaseNamespace: String = "db.namespace"
+            public var databaseResponseStatusCode: String = "db.response.status_code"
+            public var errorType: String = "error.type"
+            public var serverPort: String = "server.port"
+            public var databaseCollectionName: String = "db.collection.name"
+            public var databaseOperationBatchSize: String = "db.operation.batch.size"
+            public var databaseOperationName: String = "db.operation.name"
+            public var databaseQuerySummary: String = "db.query.summary"
+            public var databaseQueryText: String = "db.query.text"
+            public var databaseStoredProcedureName: String = "db.stored_procedure.name"
+            public var serverAddress: String = "server.address"
+            public var databaseQueryParameterPrefix: String = "db.query.parameter."
+            public var databaseResponseReturnedRows: String = "db.response.returned_rows"
+        }
+
+        /// Static attribute values used in spans created by OracleNIO.
+        public struct AttributeValues: Sendable {
+            public var databaseSystem: String = "oracle.db"
+        }
+    }
+#endif

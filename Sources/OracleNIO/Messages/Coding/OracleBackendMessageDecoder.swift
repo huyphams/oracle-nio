@@ -12,16 +12,19 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
+public import NIOCore
 
+@usableFromInline
 struct OracleBackendMessageDecoder: ByteToMessageDecoder {
 
     static let headerSize = 8
 
-    struct Container: Equatable {
+    @usableFromInline
+    struct Container: Equatable, Sendable {
         var flags: UInt8 = 0
         var messages: TinySequence<OracleBackendMessage>
     }
+    @usableFromInline
     typealias InboundOut = TinySequence<Container>
 
     private let context: Context
@@ -33,6 +36,7 @@ struct OracleBackendMessageDecoder: ByteToMessageDecoder {
     /// is only possible in debug builds.
     private let sendSingleMessages: Bool
 
+    @usableFromInline
     final class Context {
         var capabilities: Capabilities
 
@@ -44,9 +48,9 @@ struct OracleBackendMessageDecoder: ByteToMessageDecoder {
             set {
                 self._statementContext = newValue
                 switch newValue?.type {
-                case .cursor(let cursor, _):
-                    if cursor.describeInfo != self.describeInfo {
-                        self.describeInfo = cursor.describeInfo
+                case .cursor(let describeInfo, _, _):
+                    if describeInfo != self.describeInfo {
+                        self.describeInfo = describeInfo
                     }
                 default: break
                 }
@@ -57,6 +61,7 @@ struct OracleBackendMessageDecoder: ByteToMessageDecoder {
 
         var lobContext: LOBOperationContext?
 
+        @usableFromInline
         init(capabilities: Capabilities) {
             self.capabilities = capabilities
         }
@@ -81,6 +86,7 @@ struct OracleBackendMessageDecoder: ByteToMessageDecoder {
         }
     #endif
 
+    @usableFromInline
     mutating func decode(
         context: ChannelHandlerContext, buffer: inout ByteBuffer
     ) throws -> DecodingState {

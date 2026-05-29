@@ -14,7 +14,11 @@
 
 import NIOCore
 
-import struct Foundation.TimeZone
+#if canImport(FoundationEssentials)
+    import FoundationEssentials
+#else
+    import Foundation
+#endif
 
 struct ConnectionStateMachine {
     enum State {
@@ -139,7 +143,7 @@ struct ConnectionStateMachine {
 
         // Statement streaming
         case forwardRows([DataRow])
-        case forwardStreamComplete([DataRow], cursorID: UInt16, affectedRows: Int)
+        case forwardStreamComplete([DataRow], cursorID: UInt16, affectedRows: Int, lastRowID: RowID?)
         case forwardStreamError(
             OracleSQLError, read: Bool, cursorID: UInt16?, clientCancelled: Bool
         )
@@ -308,7 +312,7 @@ struct ConnectionStateMachine {
                 .dml(let promise),
                 .plsql(let promise),
                 .query(let promise),
-                .cursor(_, let promise),
+                .cursor(_, _, let promise),
                 .plain(let promise):
                 return .failStatement(
                     promise, with: oracleError, cleanupContext: nil
@@ -694,7 +698,7 @@ struct ConnectionStateMachine {
     }
 
     mutating func backendErrorReceived(
-        _ error: OracleBackendMessage.BackendError
+        _ error: BackendError
     ) -> ConnectionAction {
         switch self.state {
         case .statement(var statement):
@@ -1052,7 +1056,7 @@ extension ConnectionStateMachine {
             .uncleanShutdown,
             .unsupportedDataType:
             return true
-        case .statementCancelled, .nationalCharsetNotSupported, .missingStatement:
+        case .statementCancelled, .nationalCharsetNotSupported, .missingStatement, .malformedStatement:
             return false
         case .server:
             switch error.serverInfo?.number {
@@ -1107,6 +1111,14 @@ extension ConnectionStateMachine {
             read: self.markerState == .markerSent,
             closePromise: forwardedPromise
         )
+    }
+
+    mutating func setComboKey(_ comboKey: [UInt8]?) {
+        guard case .authenticating(var authState) = self.state else {
+            preconditionFailure("Invalid state: \(self.state)")
+        }
+        authState.comboKey = comboKey
+        self.state = .authenticating(authState)
     }
 }
 
@@ -1189,8 +1201,13 @@ extension ConnectionStateMachine {
             return .succeedStatement(promise, columns)
         case .forwardRows(let rows):
             return .forwardRows(rows)
-        case .forwardStreamComplete(let rows, let cursorID, let affectedRows):
-            return .forwardStreamComplete(rows, cursorID: cursorID, affectedRows: affectedRows)
+        case .forwardStreamComplete(let rows, let cursorID, let affectedRows, let lastRowID):
+            return .forwardStreamComplete(
+                rows,
+                cursorID: cursorID,
+                affectedRows: affectedRows,
+                lastRowID: lastRowID
+            )
         case .forwardStreamError(
             let error, let read, let cursorID, let clientCancelled
         ):

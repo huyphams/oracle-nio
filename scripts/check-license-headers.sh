@@ -43,6 +43,7 @@ read -ra PATHS_TO_CHECK_FOR_LICENSE <<< "$( \
   ":(exclude).gitignore" \
   ":(exclude).spi.yml" \
   ":(exclude).swift-format" \
+  ":(exclude).swift-version" \
   ":(exclude).mailmap" \
   ":(exclude).github/*" \
   ":(exclude)CODE_OF_CONDUCT.md" \
@@ -72,7 +73,7 @@ read -ra PATHS_TO_CHECK_FOR_LICENSE <<< "$( \
   ":(exclude)**/*.pb.swift" \
   ":(exclude)**/*.proto" \
   ":(exclude)Tests/IntegrationTests/Data/*" \
-  ":(exclude)Sources/VendoredConnectionPoolModule/*" \
+  ":(exclude)Sources/OracleConnectionPoolModule/*" \
   | xargs -0 \
 )"
 
@@ -91,7 +92,7 @@ for FILE_PATH in "${PATHS_TO_CHECK_FOR_LICENSE[@]}"; do
   FILE_HEADER=$(head -n "${EXPECTED_FILE_HEADER_LINECOUNT}" "${FILE_PATH}")
   NORMALIZED_FILE_HEADER=$(
     echo "${FILE_HEADER}" \
-    | sed -e 's/202[345]-202[345]/YEARS/' -e 's/202[345]/YEARS/' \
+    | sed -e 's/202[3456]-202[3456]/YEARS/' -e 's/202[3456]/YEARS/' \
   )
 
   if ! diff -u \

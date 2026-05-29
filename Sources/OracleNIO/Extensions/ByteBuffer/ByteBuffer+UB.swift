@@ -12,13 +12,14 @@
 //
 //===----------------------------------------------------------------------===//
 
-import struct NIOCore.ByteBuffer
+public import struct NIOCore.ByteBuffer
 
 extension ByteBuffer {
     mutating func throwingSkipUB1(file: String = #fileID, line: Int = #line) throws {
         try self.throwingMoveReaderIndex(forwardBy: 1, file: file, line: line)
     }
 
+    @inlinable
     mutating func skipUB2() {
         skipUB(2)
     }
@@ -27,6 +28,7 @@ extension ByteBuffer {
         try throwingSkipUB(4, file: file, line: line)
     }
 
+    @inlinable
     mutating func readUB2() -> UInt16? {
         guard let length = readUBLength() else { return nil }
         switch length {
@@ -41,6 +43,7 @@ extension ByteBuffer {
         }
     }
 
+    @inlinable
     mutating func throwingReadUB2(
         file: String = #fileID, line: Int = #line
     ) throws -> UInt16 {
@@ -52,6 +55,7 @@ extension ByteBuffer {
         )
     }
 
+    @inlinable
     mutating func readUB4() -> UInt32? {
         guard let length = readUBLength() else { return nil }
         switch length {
@@ -71,6 +75,7 @@ extension ByteBuffer {
         }
     }
 
+    @inlinable
     mutating func throwingReadUB4(
         file: String = #fileID, line: Int = #line
     ) throws -> UInt32 {
@@ -130,6 +135,7 @@ extension ByteBuffer {
         try throwingSkipUB(8, file: file, line: line)
     }
 
+    @inlinable
     mutating func readUBLength() -> UInt8? {
         guard var length = self.readInteger(as: UInt8.self) else { return nil }
         if length & 0x80 != 0 {
@@ -151,6 +157,7 @@ extension ByteBuffer {
         }
     }
 
+    @inlinable
     mutating func writeUB4(_ integer: UInt32) {
         switch integer {
         case 0:
@@ -187,7 +194,8 @@ extension ByteBuffer {
     }
 
     @inline(__always)
-    private mutating func skipUB(_ maxLength: Int) {
+    @inlinable
+    mutating func skipUB(_ maxLength: Int) {
         guard let length = readUBLength() else { return }
         guard length <= maxLength else { preconditionFailure() }
         self.moveReaderIndex(forwardBy: Int(length))
@@ -233,132 +241,4 @@ extension ByteBuffer {
         }
         return true
     }
-}
-
-public struct CustomOracleObject: OracleDecodable {
-  public let typeOID: ByteBuffer
-  public let oid: ByteBuffer
-  public let snapshot: ByteBuffer
-  public let data: ByteBuffer
-
-  init(
-    typeOID: ByteBuffer,
-    oid: ByteBuffer,
-    snapshot: ByteBuffer,
-    data: ByteBuffer
-  ) {
-    self.typeOID = typeOID
-    self.oid = oid
-    self.snapshot = snapshot
-    self.data = data
-  }
-
-  public static func _decodeRaw(
-    from buffer: inout ByteBuffer?,
-    type: OracleDataType,
-    context: OracleDecodingContext
-  ) throws -> CustomOracleObject {
-    guard var buffer else {
-      throw OracleDecodingError.Code.missingData
-    }
-    return try self.init(from: &buffer, type: type, context: context)
-  }
-
-  public init(
-    from buffer: inout ByteBuffer,
-    type: OracleDataType,
-    context: OracleDecodingContext
-  ) throws {
-    switch type {
-    case .object:
-      let typeOID =
-      if try buffer.throwingReadUB4() > 0 {
-        try buffer.throwingReadOracleSpecificLengthPrefixedSlice()
-      } else { ByteBuffer() }
-      let oid =
-      if try buffer.throwingReadUB4() > 0 {
-        try buffer.throwingReadOracleSpecificLengthPrefixedSlice()
-      } else { ByteBuffer() }
-      let snapshot =
-      if try buffer.throwingReadUB4() > 0 {
-        try buffer.throwingReadOracleSpecificLengthPrefixedSlice()
-      } else { ByteBuffer() }
-      buffer.skipUB2()  // version
-      let dataLength = try buffer.throwingReadUB4()
-      buffer.skipUB2()  // flags
-      let data =
-      if dataLength > 0 {
-        try buffer.throwingReadOracleSpecificLengthPrefixedSlice()
-      } else { ByteBuffer() }
-      self.init(typeOID: typeOID, oid: oid, snapshot: snapshot, data: data)
-    default:
-      throw OracleDecodingError.Code.typeMismatch
-    }
-  }
-}
-
-public struct OracleXML {
-  public enum Value {
-    case string(String)
-  }
-  public let value: Value
-
-  public init(from buffer: inout ByteBuffer) throws {
-    var decoder = Decoder(buffer: buffer)
-    self = try decoder.decode()
-  }
-
-  init(_ value: String) {
-    self.value = .string(value)
-  }
-
-  enum Error: Swift.Error {
-    case unexpectedXMLType(flag: UInt32)
-  }
-
-  struct Decoder {
-    var buffer: ByteBuffer
-
-    mutating func decode() throws -> OracleXML {
-      _ = try readHeader()
-      buffer.moveReaderIndex(forwardBy: 1)  // xml version
-      let xmlFlag = try buffer.throwingReadInteger(as: UInt32.self)
-      if (xmlFlag & Constants.TNS_XML_TYPE_FLAG_SKIP_NEXT_4) != 0 {
-        buffer.moveReaderIndex(forwardBy: 4)
-      }
-      var slice = buffer.slice()
-      if (xmlFlag & Constants.TNS_XML_TYPE_STRING) != 0 {
-        return .init(slice.readString(length: slice.readableBytes)!)
-      } else if (xmlFlag & Constants.TNS_XML_TYPE_LOB) != 0 {
-        assertionFailure("LOB not yet supported")
-      }
-      throw Error.unexpectedXMLType(flag: xmlFlag)
-    }
-
-    mutating func readHeader() throws -> (flags: UInt8, version: UInt8) {
-      let flags = try buffer.throwingReadInteger(as: UInt8.self)
-      let version = try buffer.throwingReadInteger(as: UInt8.self)
-      try skipLength()
-      if (flags & Constants.TNS_OBJ_NO_PREFIX_SEG) != 0 {
-        return (flags, version)
-      }
-      let prefixSegmentLength = try self.readLength()
-      buffer.moveReaderIndex(forwardBy: Int(prefixSegmentLength))
-      return (flags, version)
-    }
-
-    mutating func readLength() throws -> UInt32 {
-      let shortLength = try buffer.throwingReadInteger(as: UInt8.self)
-      if shortLength == Constants.TNS_LONG_LENGTH_INDICATOR {
-        return try buffer.throwingReadInteger()
-      }
-      return UInt32(shortLength)
-    }
-
-    mutating func skipLength() throws {
-      if try buffer.throwingReadInteger(as: UInt8.self) == Constants.TNS_LONG_LENGTH_INDICATOR {
-        buffer.moveReaderIndex(forwardBy: 4)
-      }
-    }
-  }
 }

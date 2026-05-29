@@ -14,12 +14,14 @@
 
 import Atomics
 import Crypto
+import NIOConcurrencyHelpers
 import NIOCore
 
-import struct Foundation.Date
-import class Foundation.DateFormatter
-import struct Foundation.Locale
-import struct Foundation.TimeZone
+#if canImport(FoundationEssentials)
+    import FoundationEssentials
+#else
+    import Foundation
+#endif
 
 struct OracleFrontendMessageEncoder {
     static let headerSize = 8
@@ -107,9 +109,7 @@ struct OracleFrontendMessageEncoder {
             serviceOptions |= Constants.TNS_GSO_CAN_RECV_ATTENTION
             connectFlags2 |= Constants.TNS_CHECK_OOB
         }
-        let connectStringByteLength =
-            connectString
-            .lengthOfBytes(using: .utf8)
+        let connectStringByteLength = connectString.utf8.count
 
         self.startRequest(packetType: .connect)
 
@@ -278,10 +278,12 @@ struct OracleFrontendMessageEncoder {
         )
     }
 
+    /// - Returns: Combo ley if username password based authentication is used.
+    ///            The combo key is needed to verify the response later.
     mutating func authenticationPhaseTwo(
         authContext: AuthContext,
         parameters: OracleBackendMessage.Parameter
-    ) throws {
+    ) throws -> [UInt8]? {
         self.clearIfNeeded()
 
         let verifierType = parameters["AUTH_VFR_DATA"]?.flags
@@ -298,7 +300,7 @@ struct OracleFrontendMessageEncoder {
             numberOfPairs += 1
             verifier11g = false  // ignored
 
-            switch token {
+            switch token.base {
             case .oAuth2: break
             case .tokenAndPrivateKey: numberOfPairs += 2
             }
@@ -350,21 +352,21 @@ struct OracleFrontendMessageEncoder {
             self.writeKeyValuePair(key: "PROXY_CLIENT_NAME", value: proxyUser)
         }
 
+        let comboKey: [UInt8]?
         switch authContext.method.base {
         case .token(let token):
-            switch token {
+            switch token.base {
             case .oAuth2(let token):
                 self.writeKeyValuePair(key: "AUTH_TOKEN", value: token)
             case .tokenAndPrivateKey(let token, let key):
                 self.writeKeyValuePair(key: "AUTH_TOKEN", value: token)
-            if #available(macOS 12,  iOS 15.0, *) {
-                let now = authHeaderDateFormatter.string(from: .now)
+                let now = authHeaderDate(for: Date())
                 let hostInfo = """
                     \(authContext.peerAddress?.ipAddress ?? ""):\
                     \(authContext.peerAddress?.port ?? 0)
                     """
                 guard
-                    case .serviceName(let serviceName) = authContext.service
+                    case .serviceName(let serviceName) = authContext.service.base
                 else {
                     throw OracleSQLError.sidNotSupported
                 }
@@ -377,19 +379,19 @@ struct OracleFrontendMessageEncoder {
                 self.writeKeyValuePair(key: "AUTH_HEADER", value: header)
                 self.writeKeyValuePair(key: "AUTH_SIGNATURE", value: signature)
             }
-          }
-
+            comboKey = nil
 
         case .usernamePassword(_, let password, let newPassword):
 
             let (
-                sessionKey, speedyKey, encodedPassword, encodedNewPassword
+                sessionKey, speedyKey, encodedPassword, encodedNewPassword, _comboKey
             ) = try Self.generateVerifier(
                 password: password,
                 newPassword: newPassword,
                 parameters: parameters,
                 verifier11g
             )
+            comboKey = _comboKey
 
             self.writeKeyValuePair(
                 key: "AUTH_SESSKEY", value: sessionKey, flags: 1
@@ -438,6 +440,8 @@ struct OracleFrontendMessageEncoder {
         }
 
         self.endRequest()
+
+        return comboKey
     }
 
     mutating func execute(
@@ -887,7 +891,8 @@ extension OracleFrontendMessageEncoder {
         sessionKey: String,
         speedyKey: String?,
         encodedPassword: String,
-        encodedNewPassword: String?
+        encodedNewPassword: String?,
+        comboKey: [UInt8]
     ) {
         let sessionKey: String
         let speedyKey: String?
@@ -901,7 +906,7 @@ extension OracleFrontendMessageEncoder {
                 expected: "AUTH_VFR_DATA", in: parameters
             )
         }
-        let verifierData = Self.hexToBytes(string: authVFRData.value)
+        let verifierData = try Array(_hexString: authVFRData.value)
         let keyLength: Int
 
         // create password hash
@@ -943,7 +948,7 @@ extension OracleFrontendMessageEncoder {
                 expected: "AUTH_SESSKEY", in: parameters
             )
         }
-        let encodedServerKey = Self.hexToBytes(string: authSessionKey.value)
+        let encodedServerKey = try Array(_hexString: authSessionKey.value)
         let sessionKeyPartA = try decryptCBC(passwordHash, encodedServerKey)
 
         // generate second half of session key
@@ -959,7 +964,7 @@ extension OracleFrontendMessageEncoder {
                 expected: "AUTH_PBKDF2_CSK_SALT", in: parameters
             )
         }
-        let mixingSalt = Self.hexToBytes(string: cskSalt.value)
+        let mixingSalt = try Array(_hexString: cskSalt.value)
         guard
             let sderCountStr = parameters["AUTH_PBKDF2_SDER_COUNT"],
             let sderCount = Int(sderCountStr.value)
@@ -969,18 +974,18 @@ extension OracleFrontendMessageEncoder {
             )
         }
         let iterations = sderCount
-        let comboKey = Array(
+        let tempKey = Array(
             sessionKeyPartB.prefix(keyLength) + sessionKeyPartA.prefix(keyLength)
         )
-        let derivedKey = try getDerivedKey(
-            key: comboKey.hexString.uppercased().data(using: .utf8) ?? .init(),
+        let comboKey = try getDerivedKey(
+            key: Array(tempKey.hexString.uppercased().utf8),
             salt: mixingSalt, length: keyLength, iterations: iterations
         )
 
         // generate speedy key for 12c verifiers
         if !verifier11g, let passwordKey {
             let salt = [UInt8].random(count: 16)
-            let speedyKeyCBC = try encryptCBC(derivedKey, salt + passwordKey)
+            let speedyKeyCBC = try encryptCBC(comboKey, salt + passwordKey)
             speedyKey = speedyKeyCBC.prefix(80).hexString.uppercased()
         } else {
             speedyKey = nil
@@ -989,19 +994,19 @@ extension OracleFrontendMessageEncoder {
         // encrypt password
         let pwSalt = [UInt8].random(count: 16)
         let passwordWithSalt = pwSalt + password
-        let encryptedPassword = try encryptCBC(derivedKey, passwordWithSalt)
+        let encryptedPassword = try encryptCBC(comboKey, passwordWithSalt)
         encodedPassword = encryptedPassword.hexString.uppercased()
 
         // encrypt new password
         if let newPassword = newPassword?.data(using: .utf8) {
             let newPasswordWithSalt = pwSalt + newPassword
-            let encryptedNewPassword = try encryptCBC(derivedKey, newPasswordWithSalt)
+            let encryptedNewPassword = try encryptCBC(comboKey, newPasswordWithSalt)
             encodedNewPassword = encryptedNewPassword.hexString.uppercased()
         } else {
             encodedNewPassword = nil
         }
 
-        return (sessionKey, speedyKey, encodedPassword, encodedNewPassword)
+        return (sessionKey, speedyKey, encodedPassword, encodedNewPassword, comboKey)
     }
 
     private mutating func writeKeyValuePair(
@@ -1018,20 +1023,6 @@ extension OracleFrontendMessageEncoder {
             valueBytes._encodeRaw(into: &buffer, context: .default)
         }
         self.buffer.writeUB4(flags)
-    }
-
-    private static func hexToBytes(string: String) -> [UInt8] {
-        let stringArray = Array(string)
-        var data = [UInt8]()
-        for i in stride(from: 0, to: string.count, by: 2) {
-            let pair: String = String(stringArray[i]) + String(stringArray[i + 1])
-            if let byte = UInt8(pair, radix: 16) {
-                data.append(byte)
-            } else {
-                fatalError("Couldn't create byte from hex value: \(pair)")
-            }
-        }
-        return data
     }
 
     private mutating func writeBasicAuthData(
@@ -1250,8 +1241,8 @@ extension OracleFrontendMessageEncoder {
         let tzMinute = (abs(offset) % 3600) / 60
         let sign = offset >= 0 ? "+" : "-"
         let tzRepresentation = """
-            \(sign)\(String(format: "%02d", tzHour))\
-            :\(String(format: "%02d", tzMinute))
+            \(sign)\(String(tzHour, padding: 2))\
+            :\(String(tzMinute, padding: 2))
             """
         return "ALTER SESSION SET TIME_ZONE='\(tzRepresentation)'\0"
     }
@@ -1267,7 +1258,7 @@ private protocol ColumnMetadata {
 
 extension OracleBindings.Metadata: ColumnMetadata {}
 
-extension OracleColumn: ColumnMetadata {
+extension DescribeInfo.Column: ColumnMetadata {
     var isArray: Bool { false }
     var maxArraySize: Int { 0 }
 }
@@ -1278,12 +1269,3 @@ enum OracleFrontendMessageID: UInt8 {
     case onewayFN = 26
     case fastAuth = 34
 }
-
-private let authHeaderDateFormatter: DateFormatter = {
-    let format = "E, dd MMM yyyy HH:mm:ss 'GMT'"
-    let formatter = DateFormatter()
-    formatter.dateFormat = format
-    formatter.locale = Locale(identifier: "en_US_POSIX")
-    formatter.timeZone = TimeZone(abbreviation: "GMT")
-    return formatter
-}()

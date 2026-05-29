@@ -13,7 +13,14 @@
 //===----------------------------------------------------------------------===//
 
 // swift-format-ignore-file
-import Foundation
+
+#if canImport(Darwin)
+import Darwin
+#elseif canImport(Glibc)
+import Glibc
+#elseif canImport(Musl)
+import Musl
+#endif
 
 @usableFromInline
 enum Constants {
@@ -31,6 +38,7 @@ enum Constants {
     static let TNS_MARKER_TYPE_INTERRUPT = 3
 
     // MARK: Charset forms
+    @usableFromInline
     static let TNS_CS_IMPLICIT = 1
     static let TNS_CS_NCHAR = 2
 
@@ -60,6 +68,7 @@ enum Constants {
     static let TNS_OBJ_IS_VERSION_81 = 0x80
     static let TNS_OBJ_IS_DEGENERATE = 0x10
     static let TNS_OBJ_IS_COLLECTION = 0x08
+    @usableFromInline
     static let TNS_OBJ_NO_PREFIX_SEG: UInt8 = 0x04
     static let TNS_OBJ_IMAGE_VERSION = 1
 
@@ -95,8 +104,11 @@ enum Constants {
     static let TNS_OBJ_TDS_TYPE_BINARY_DOUBLE = 45
 
     // MARK: XML type constants
+    @usableFromInline
     static let TNS_XML_TYPE_LOB: UInt32 = 0x0001
+    @usableFromInline
     static let TNS_XML_TYPE_STRING: UInt32 = 0x0004
+    @usableFromInline
     static let TNS_XML_TYPE_FLAG_SKIP_NEXT_4: UInt32 = 0x100000
 
     // MARK: Execute options
@@ -340,6 +352,7 @@ enum Constants {
     static let TNS_CCAP_O8LOGON_LONG_IDENTIFIER: UInt8 = 64
     static let TNS_CCAP_O9LOGON_LONG_PASSWORD: UInt8 = 0x80
     static let TNS_CCAP_CTB_IMPLICIT_POOL: UInt8 = 0x08
+    static let TNS_CCAP_CTB_OAUTH_MSG_ON_ERR: UInt8 = 0x10
     static let TNS_CCAP_END_OF_CALL_STATUS: UInt8 = 0x01
     static let TNS_CCAP_IND_RCD: UInt8 = 0x08
     static let TNS_CCAP_FAST_BVEC: UInt8 = 0x20
@@ -388,6 +401,7 @@ enum Constants {
     static let TNS_ACCEPT_FLAG_HAS_END_OF_REQUEST: UInt32 = 0x0200_0000
 
     // MARK: Other constants
+    @usableFromInline
     static let TNS_MAX_SHORT_LENGTH = 252
     @usableFromInline
     static let TNS_ESCAPE_CHAR: UInt8 = 253
@@ -396,7 +410,9 @@ enum Constants {
     @usableFromInline
     static let TNS_NULL_LENGTH_INDICATOR: UInt8 = 255
     static let TNS_MAX_ROWID_LENGTH = 18
+    @usableFromInline
     static let TNS_DURATION_MID: UInt32 = 0x8000_0000
+    @usableFromInline
     static let TNS_DURATION_OFFSET: UInt8 = 60
     static let TNS_DURATION_SESSION: UInt64 = 10
     @usableFromInline
@@ -407,9 +423,11 @@ enum Constants {
     static let TNS_MAX_CURSORS_TO_CLOSE = 500
     static let TNS_TXN_IN_PROGRESS = 0x0000_0002
     static let TNS_MAX_CONNECT_DATA = 230
+    @usableFromInline
     static let TNS_CHUNK_SIZE = 32767
     static let TNS_MAX_UROWID_LENGTH: UInt32 = 5267
     static let TNS_SERVER_CONVERTS_CHARS: UInt8 = 0x01
+    @usableFromInline
     static let TNS_HAS_REGION_ID: UInt8 = 0x80
 
     // MARK: Base 64 encoding alphabet
@@ -418,8 +436,10 @@ enum Constants {
     static let TNS_EXTENT_OID = 0x0000_0000_0000_0000_0000_0000_0001_0001
 
     // MARK: Timezone offsets
-    static let TZ_HOUR_OFFSET: UInt8 = 20
-    static let TZ_MINUTE_OFFSET: UInt8 = 60
+    @usableFromInline
+    static let TZ_HOUR_OFFSET: Int = 20
+    @usableFromInline
+    static let TZ_MINUTE_OFFSET: Int = 60
 
     // MARK: DRCP release mode
     static let DRCP_DEAUTHENTICATE: UInt32 = 0x0000_0002
@@ -460,7 +480,7 @@ extension Constants {
 
     // MARK: AQ dequeue wait modes
     static let DEQ_NO_WAIT = 0
-    static let DEQ_WAIT_FOREVER = pow(2, 32) - 1
+    static let DEQ_WAIT_FOREVER = pow(2.0, 32.0) - 1.0
 
     // MARK: AQ enqueue visibility modes
     static let ENQ_IMMEDIATE = 1

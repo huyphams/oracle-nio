@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+import NIOConcurrencyHelpers
 import NIOCore
 
 struct StatementStateMachine {
@@ -28,7 +29,7 @@ struct StatementStateMachine {
         )
         /// Indicates that the current statement was cancelled and we want to drain
         /// rows from the connection ASAP.
-        case drain([OracleColumn])
+        case drain([DescribeInfo.Column])
 
         case commandComplete
         case error(OracleSQLError)
@@ -48,7 +49,7 @@ struct StatementStateMachine {
         case evaluateErrorAtConnectionLevel(OracleSQLError)
 
         case forwardRows([DataRow])
-        case forwardStreamComplete([DataRow], cursorID: UInt16, affectedRows: Int)
+        case forwardStreamComplete([DataRow], cursorID: UInt16, affectedRows: Int, lastRowID: RowID?)
         /// Error payload and a optional cursor ID, which should be closed in a future roundtrip.
         case forwardStreamError(
             OracleSQLError,
@@ -77,8 +78,8 @@ struct StatementStateMachine {
             )
         }
 
-        if case .cursor(let cursor, _) = statementContext.type {
-            self.state = .describeInfoReceived(statementContext, cursor.describeInfo)
+        if case .cursor(let describeInfo, _, _) = statementContext.type {
+            self.state = .describeInfoReceived(statementContext, describeInfo)
         }
 
         return .sendExecute(
@@ -108,7 +109,7 @@ struct StatementStateMachine {
                 .dml(let promise),
                 .plsql(let promise),
                 .query(let promise),
-                .cursor(_, let promise),
+                .cursor(_, _, let promise),
                 .plain(let promise):
                 return .failStatement(promise, with: .statementCancelled)
             }
@@ -163,7 +164,7 @@ struct StatementStateMachine {
                 .dml(let promise),
                 .plsql(let promise),
                 .query(let promise),
-                .cursor(_, let promise),
+                .cursor(_, _, let promise),
                 .plain(let promise):
                 return .succeedStatement(
                     promise,
@@ -228,9 +229,22 @@ struct StatementStateMachine {
                     out.writeBuffer(&buffer)
                 case .duplicate(let index):
                     var data = demandStateMachine.receivedDuplicate(at: index)
-                    try! out.writeLengthPrefixed(as: UInt8.self) { buffer in
-                        buffer.writeBuffer(&data)
-                    }  // must work
+                    if data.readableBytes <= Constants.TNS_MAX_SHORT_LENGTH {
+                        try! out.writeLengthPrefixed(as: UInt8.self) { buffer in
+                            buffer.writeBuffer(&data)
+                        }  // must work
+                    } else {
+                        var length = data.readableBytes
+                        out.writeInteger(Constants.TNS_LONG_LENGTH_INDICATOR)
+                        while data.readableBytes > 0 {
+                            let chunkLength = min(length, Constants.TNS_CHUNK_SIZE)
+                            out.writeInteger(UInt32(chunkLength))
+                            length -= chunkLength
+                            var part = data.readSlice(length: chunkLength)!
+                            out.writeBuffer(&part)
+                        }
+                        out.writeInteger(UInt32(0))
+                    }
                 }
             }
             let row = DataRow(columnCount: describeInfo.columns.count, bytes: out)
@@ -291,7 +305,7 @@ struct StatementStateMachine {
     }
 
     mutating func errorReceived(
-        _ error: OracleBackendMessage.BackendError
+        _ error: BackendError
     ) -> Action {
         let batchErrors = error.batchErrors.map(OracleSQLError.BatchError.init)
 
@@ -313,12 +327,16 @@ struct StatementStateMachine {
                     .plsql(let promise),
                     .dml(let promise),
                     .ddl(let promise),
-                    .cursor(_, let promise),
+                    .cursor(_, _, let promise),
                     .plain(let promise):
                     action = .succeedStatement(
                         promise,
                         .init(
-                            value: .noRows(affectedRows: Int(error.rowCount ?? 0), columns: []),
+                            value: .noRows(
+                                affectedRows: error.rowCount,
+                                lastRowID: error.rowID,
+                                columns: []
+                            ),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: nil,
@@ -336,12 +354,16 @@ struct StatementStateMachine {
                     .plsql(let promise),
                     .dml(let promise),
                     .ddl(let promise),
-                    .cursor(_, let promise),
+                    .cursor(_, _, let promise),
                     .plain(let promise):
                     action = .succeedStatement(
                         promise,
                         .init(
-                            value: .noRows(affectedRows: Int(error.rowCount ?? 0), columns: describeInfo.columns),
+                            value: .noRows(
+                                affectedRows: error.rowCount,
+                                lastRowID: error.rowID,
+                                columns: describeInfo.columns
+                            ),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: nil,
@@ -359,12 +381,16 @@ struct StatementStateMachine {
                     .plsql(let promise),
                     .dml(let promise),
                     .ddl(let promise),
-                    .cursor(_, let promise),
+                    .cursor(_, _, let promise),
                     .plain(let promise):
                     action = .succeedStatement(
                         promise,
                         .init(
-                            value: .noRows(affectedRows: Int(error.rowCount ?? 0), columns: []),
+                            value: .noRows(
+                                affectedRows: error.rowCount,
+                                lastRowID: error.rowID,
+                                columns: []
+                            ),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: rowCounts,
@@ -382,7 +408,8 @@ struct StatementStateMachine {
                 action = .forwardStreamComplete(
                     rows,
                     cursorID: error.cursorID ?? context.cursorID,
-                    affectedRows: Int(error.rowCount ?? 0)
+                    affectedRows: error.rowCount,
+                    lastRowID: error.rowID
                 )
 
             case .modifying:
@@ -401,7 +428,7 @@ struct StatementStateMachine {
                     .plsql(let promise),
                     .dml(let promise),
                     .ddl(let promise),
-                    .cursor(_, let promise),
+                    .cursor(_, _, let promise),
                     .plain(let promise):
                     action = .failStatement(promise, with: .server(error))
                 }
@@ -425,7 +452,7 @@ struct StatementStateMachine {
                     .plsql(let promise),
                     .dml(let promise),
                     .ddl(let promise),
-                    .cursor(_, let promise),
+                    .cursor(_, _, let promise),
                     .plain(let promise):
                     action = .failStatement(promise, with: .server(error))
                 }
@@ -461,12 +488,16 @@ struct StatementStateMachine {
                     .plsql(let promise),
                     .dml(let promise),
                     .ddl(let promise),
-                    .cursor(_, let promise),
+                    .cursor(_, _, let promise),
                     .plain(let promise):
                     action = .succeedStatement(
                         promise,
                         StatementResult(
-                            value: .noRows(affectedRows: Int(error.rowCount ?? 0), columns: []),
+                            value: .noRows(
+                                affectedRows: error.rowCount,
+                                lastRowID: error.rowID,
+                                columns: []
+                            ),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: nil,
@@ -482,12 +513,16 @@ struct StatementStateMachine {
                     .plsql(let promise),
                     .dml(let promise),
                     .ddl(let promise),
-                    .cursor(_, let promise),
+                    .cursor(_, _, let promise),
                     .plain(let promise):
                     action = .succeedStatement(
                         promise,
                         StatementResult(
-                            value: .noRows(affectedRows: Int(error.rowCount ?? 0), columns: []),
+                            value: .noRows(
+                                affectedRows: error.rowCount,
+                                lastRowID: error.rowID,
+                                columns: []
+                            ),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: rowCounts,
@@ -554,7 +589,7 @@ struct StatementStateMachine {
                         .plsql(let promise),
                         .dml(let promise),
                         .ddl(let promise),
-                        .cursor(_, let promise),
+                        .cursor(_, _, let promise),
                         .plain(let promise):
                         action = .failStatement(promise, with: .server(error))
                     }
@@ -779,7 +814,7 @@ struct StatementStateMachine {
                     .dml(let promise),
                     .plsql(let promise),
                     .query(let promise),
-                    .cursor(_, let promise),
+                    .cursor(_, _, let promise),
                     .plain(let promise):
                     self.state = .error(error)
                     return .failStatement(promise, with: error)

@@ -12,6 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
+import NIOConcurrencyHelpers
 import NIOCore
 
 extension OracleBackendMessage {
@@ -35,8 +36,8 @@ extension OracleBackendMessage {
 
             let describeInfo =
                 switch context.statementContext?.type {
-                case .cursor(let cursor, _):
-                    cursor.describeInfo
+                case .cursor(let describeInfo, _, _):
+                    describeInfo
                 default:
                     context.describeInfo
                 }
@@ -87,6 +88,7 @@ extension OracleBackendMessage {
                         oracleType: column.dataType._oracleType,
                         csfrm: column.dataType.csfrm,
                         bufferSize: column.bufferSize,
+                        forBind: false,
                         capabilities: context.capabilities
                     )
                     columns.append(.data(data))
@@ -103,6 +105,7 @@ extension OracleBackendMessage {
             oracleType: _TNSDataType?,
             csfrm: UInt8,
             bufferSize: UInt32,
+            forBind: Bool,
             capabilities: Capabilities
         ) throws -> ByteBuffer {
             var columnValue: ByteBuffer
@@ -130,18 +133,27 @@ extension OracleBackendMessage {
                     throw MissingDataDecodingError.Trigger()
                 }
             case .rowID:
-                // length is not the actual length of row ids
-                let length = try buffer.throwingReadInteger(as: UInt8.self)
-                if length == 0 || length == Constants.TNS_NULL_LENGTH_INDICATOR {
-                    columnValue = ByteBuffer(bytes: [0])  // NULL indicator
-                } else {
+                if forBind {
+                    let value = try buffer.readString()
+                    let rowID = RowID(value)
                     columnValue = ByteBuffer()
                     try columnValue.writeLengthPrefixed(as: UInt8.self) {
-                        let start = buffer.readerIndex
-                        _ = try RowID(from: &buffer, type: .rowID, context: .default)
-                        let end = buffer.readerIndex
-                        buffer.moveReaderIndex(to: start)
-                        return $0.writeImmutableBuffer(buffer.readSlice(length: end - start)!)
+                        $0.writeString(rowID.description)
+                    }
+                } else {
+                    // length is not the actual length of row ids
+                    let length = try buffer.throwingReadInteger(as: UInt8.self)
+                    if length == 0 || length == Constants.TNS_NULL_LENGTH_INDICATOR {
+                        columnValue = ByteBuffer(bytes: [0])  // NULL indicator
+                    } else {
+                        columnValue = ByteBuffer()
+                        if let rowID = try RowID(fromWire: &buffer) {
+                            try columnValue.writeLengthPrefixed(as: UInt8.self) {
+                                $0.writeString(rowID.description)
+                            }
+                        } else {
+                            columnValue = ByteBuffer(bytes: [0])  // NULL indicator
+                        }
                     }
                 }
             case .cursor:
@@ -243,7 +255,10 @@ extension OracleBackendMessage {
                 }
                 columnValue.writeInteger(0, as: UInt32.self)  // chunk length of zero
             default:
-                columnValue = .init(bytes: "Unsupported \(String(reflecting: oracleType))".data(using: .utf8)!)
+                guard buffer.readOracleSlice() != nil else {
+                    throw MissingDataDecodingError.Trigger()
+                }
+                columnValue = ByteBuffer(string: "Unsupported \(String(reflecting: oracleType))")
                 return columnValue
             }
 
@@ -305,6 +320,7 @@ extension OracleBackendMessage {
                 oracleType: metadata.dataType._oracleType,
                 csfrm: metadata.dataType.csfrm,
                 bufferSize: metadata.bufferSize,
+                forBind: true,
                 capabilities: capabilities
             )
 

@@ -13,8 +13,9 @@
 //===----------------------------------------------------------------------===//
 
 import Logging
-import _ConnectionPoolModule
+import _OracleConnectionPoolModule
 
+@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 final class OracleClientMetrics: ConnectionPoolObservabilityDelegate {
     typealias ConnectionID = OracleConnection.ID
 
@@ -35,7 +36,7 @@ final class OracleClientMetrics: ConnectionPoolObservabilityDelegate {
     /// A connection attempt failed with the given error. After some period of
     /// time ``startedConnecting(id:)`` may be called again.
     func connectFailed(id: OracleConnection.ID, error: Error) {
-        self.logger.debug(
+        self.logger.info(
             "Connection creation failed",
             metadata: [
                 .connectionID: "\(id)",

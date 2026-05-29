@@ -13,16 +13,32 @@
 //===----------------------------------------------------------------------===//
 
 @preconcurrency import Dispatch
-import Logging
+public import Logging
 import NIOConcurrencyHelpers
-import NIOCore
+public import NIOCore
 import NIOPosix
 import NIOSSL
 
-import class Foundation.ProcessInfo
+#if canImport(FoundationEssentials)
+    import FoundationEssentials
+#else
+    import Foundation
+#endif
 
 #if canImport(Network)
     import NIOTransportServices
+#endif
+
+#if DistributedTracingSupport
+    public import Tracing
+#endif
+
+#if _IOTracing
+    import Atomics
+#endif
+
+#if _IOTracing
+    import Atomics
 #endif
 
 /// An Oracle connection. Use it to run queries against an Oracle server.
@@ -34,18 +50,18 @@ import class Foundation.ProcessInfo
 ///
 /// @Snippet(path: "oracle-nio/Snippets/OracleConnection", slice: "configuration")
 ///
-/// You can now use your configuration to establish a connection using ``OracleConnection/connect(on:configuration:id:)``.
+/// You can now use your configuration to establish a connection using ``OracleConnection/connect(on:configuration:id:logger:)``.
 ///
 /// @Snippet(path: "oracle-nio/Snippets/OracleConnection", slice: "connect")
 ///
 /// ## Usage
 ///
 /// Now you can use the connection to run queries on your database using
-/// ``OracleConnection/execute(_:options:logger:file:line:)-vguo``.
+/// ``OracleConnection/execute(_:options:logger:file:line:)->OracleRowSequence``.
 ///
 /// @Snippet(path: "oracle-nio/Snippets/OracleConnection", slice: "use")
 ///
-/// After you're done, close the connection with ``OracleConnection/close()-4ny0f``.
+/// After you're done, close the connection with ``OracleConnection/close()``.
 ///
 /// @Snippet(path: "oracle-nio/Snippets/OracleConnection", slice: "close")
 ///
@@ -59,10 +75,10 @@ public final class OracleConnection: Sendable {
     let configuration: Configuration
     let channel: Channel
     let logger: Logger
+    let context: OracleSQLEvent.StartupContext
 
-    public var closeFuture: EventLoopFuture<Void> {
-        channel.closeFuture
-    }
+    var closeFuture: EventLoopFuture<Void> { self.channel.closeFuture }
+    var eventLoop: EventLoop { self.channel.eventLoop }
 
     public var isClosed: Bool {
         !self.channel.isActive
@@ -70,34 +86,56 @@ public final class OracleConnection: Sendable {
 
     public let id: ID
 
-    public var eventLoop: EventLoop { channel.eventLoop }
-
     /// The connection's session ID (SID).
-    public let sessionID: Int
-    let serialNumber: Int
+    public var sessionID: Int { self.context.sessionID }
+    var serialNumber: Int { self.context.serialNumber }
     /// The version of the Oracle server, the connection is established to.
-    public let serverVersion: OracleVersion
+    public var serverVersion: OracleVersion { self.context.version }
 
+    @usableFromInline
     static let noopLogger = Logger(label: "oracle-nio.noop-logger") { _ in
         SwiftLogNoOpLogHandler()
     }
+
+    #if DistributedTracingSupport
+        let tracer: (any Tracer)?
+
+        var databaseNamespace: String {
+            var namespace = ""
+            if let serviceName = self.context.serviceName {
+                namespace += serviceName
+            }
+            if let databaseName = self.context.databaseName {
+                if !namespace.isEmpty {
+                    namespace += "|"
+                }
+                namespace += databaseName
+            }
+            if let instanceName = self.context.instanceName {
+                if !namespace.isEmpty {
+                    namespace += "|"
+                }
+                namespace += instanceName
+            }
+            return namespace
+        }
+    #endif
 
     private init(
         configuration: OracleConnection.Configuration,
         channel: Channel,
         connectionID: ID,
         logger: Logger,
-        sessionID: Int,
-        serialNumber: Int,
-        serverVersion: OracleVersion
+        context: OracleSQLEvent.StartupContext
     ) {
         self.id = connectionID
         self.configuration = configuration
         self.logger = logger
         self.channel = channel
-        self.sessionID = sessionID
-        self.serialNumber = serialNumber
-        self.serverVersion = serverVersion
+        self.context = context
+        #if DistributedTracingSupport
+            self.tracer = configuration.tracing.tracer
+        #endif
     }
     deinit {
         assert(isClosed, "OracleConnection deinitialized before being closed.")
@@ -142,12 +180,13 @@ public final class OracleConnection: Sendable {
         // 2. add handlers
 
         do {
-            #if DEBUG
+            #if _IOTracing
                 // This is very useful for sending hex dumps to Oracle to analyze
                 // problems in the driver.
                 let tracer = OracleTraceHandler(
                     connectionID: connectionID,
-                    logger: Logger(label: "oracle-nio.network-tracing")
+                    logger: Logger(label: "oracle-nio.network-tracing"),
+                    shouldLog: configuration._ioTracingEnabled
                 )
                 try channel.pipeline.syncOperations.addHandler(tracer)
             #endif
@@ -176,9 +215,7 @@ public final class OracleConnection: Sendable {
                     channel: channel,
                     connectionID: connectionID,
                     logger: logger,
-                    sessionID: context.sessionID,
-                    serialNumber: context.serialNumber,
-                    serverVersion: context.version
+                    context: context
                 )
             }
     }
@@ -342,7 +379,7 @@ public final class OracleConnection: Sendable {
 
 // MARK: Async/Await Interface
 
-extension OracleConnection {
+extension OracleConnection: OracleConnectionProtocol {
 
     /// Creates a new connection to an Oracle server.
     ///
@@ -350,35 +387,14 @@ extension OracleConnection {
     ///   - eventLoop: The `EventLoop` the connection shall be created on.
     ///   - configuration: A ``Configuration`` that shall be used for the connection.
     ///   - connectionID: An `Int` id, used for metadata logging.
-    /// - Returns: An established ``OracleConnection`` asynchronously that can be used to run
-    ///            queries.
-    public static func connect(
-        on eventLoop: EventLoop = OracleConnection.defaultEventLoopGroup.any(),
-        configuration: OracleConnection.Configuration,
-        id connectionID: ID
-    ) async throws -> OracleConnection {
-        try await self.connect(
-            on: eventLoop,
-            configuration: configuration,
-            id: connectionID,
-            logger: self.noopLogger
-        )
-    }
-
-    /// Creates a new connection to an Oracle server.
-    ///
-    /// - Parameters:
-    ///   - eventLoop: The `EventLoop` the connection shall be created on.
-    ///   - configuration: A ``Configuration`` that shall be used for the connection.
-    ///   - connectionID: An `Int` id, used for metadata logging.
-    ///   - logger: A logger to log background events into.
+    ///   - logger: A logger to log background events into. Defaults to logging disabled
     /// - Returns: An established ``OracleConnection`` asynchronously that can be used to run
     ///            queries.
     public static func connect(
         on eventLoop: EventLoop = OracleConnection.defaultEventLoopGroup.any(),
         configuration: OracleConnection.Configuration,
         id connectionID: ID,
-        logger: Logger
+        logger: Logger = OracleConnection.noopLogger
     ) async throws -> OracleConnection {
         var attempts = configuration.retryCount
         while attempts > 0 {
@@ -445,12 +461,20 @@ extension OracleConnection {
     public func execute(
         _ statement: OracleStatement,
         options: StatementOptions = .init(),
-        logger: Logger? = nil,
+        logger: Logger = OracleConnection.noopLogger,
         file: String = #fileID, line: Int = #line
     ) async throws -> OracleRowSequence {
-        var logger = logger ?? Self.noopLogger
+        var logger = logger
         logger[oracleMetadataKey: .connectionID] = "\(self.id)"
         logger[oracleMetadataKey: .sessionID] = "\(self.sessionID)"
+
+        #if DistributedTracingSupport
+            let span = self.tracer?.startSpan(statement.keyword, ofKind: .client)
+            span?.updateAttributes { attributes in
+                self.applyCommonAttributes(to: &attributes, querySummary: statement.summary, queryText: statement.sql)
+            }
+            defer { span?.end() }
+        #endif
 
         let promise = self.channel.eventLoop.makePromise(
             of: OracleRowStream.self
@@ -472,6 +496,15 @@ extension OracleConnection {
             error.file = file
             error.line = line
             error.statement = statement
+            #if DistributedTracingSupport
+                span?.recordError(error)
+                span?.setStatus(SpanStatus(code: .error))
+                span?.attributes[self.configuration.tracing.attributeNames.errorType] = error.code.description
+                if let number = error.serverInfo?.number {
+                    span?.attributes[self.configuration.tracing.attributeNames.databaseResponseStatusCode] =
+                        "ORA-\(String(number, padding: 5))"
+                }
+            #endif
             throw error  // rethrow with more metadata
         }
     }
@@ -490,7 +523,7 @@ extension OracleConnection {
     public func execute<Statement: OraclePreparedStatement, Row>(
         _ statement: Statement,
         options: StatementOptions = .init(),
-        logger: Logger? = nil,
+        logger: Logger = OracleConnection.noopLogger,
         file: String = #fileID, line: Int = #line
     ) async throws -> AsyncThrowingMapSequence<OracleRowSequence, Row> where Row == Statement.Row {
         let sendableStatement = try OracleStatement(
@@ -500,15 +533,28 @@ extension OracleConnection {
         return stream.map { try statement.decodeRow($0) }
     }
 
+    @usableFromInline
     func execute(
-        cursor: Cursor,
+        cursor: consuming Cursor,
         options: StatementOptions = .init(),
-        logger: Logger? = nil,
+        logger: Logger,
         file: String = #fileID, line: Int = #line
     ) async throws -> OracleRowSequence {
-        var logger = logger ?? Self.noopLogger
+        var logger = logger
         logger[oracleMetadataKey: .connectionID] = "\(self.id)"
         logger[oracleMetadataKey: .sessionID] = "\(self.sessionID)"
+
+        #if DistributedTracingSupport
+            let span = self.tracer?.startSpan("CURSOR", ofKind: .client)
+            span?.updateAttributes { attributes in
+                self.applyCommonAttributes(
+                    to: &attributes,
+                    querySummary: "CURSOR",
+                    queryText: "CURSOR \(cursor.describeInfo.columns.map(\.name).joined(separator: ", "))"
+                )
+            }
+            defer { span?.end() }
+        #endif
 
         let promise = self.channel.eventLoop.makePromise(
             of: OracleRowStream.self
@@ -529,7 +575,61 @@ extension OracleConnection {
         } catch var error as OracleSQLError {
             error.file = file
             error.line = line
+            #if DistributedTracingSupport
+                span?.recordError(error)
+                span?.setStatus(SpanStatus(code: .error))
+                span?.attributes[self.configuration.tracing.attributeNames.errorType] = error.code.description
+                if let number = error.serverInfo?.number {
+                    span?.attributes[self.configuration.tracing.attributeNames.databaseResponseStatusCode] =
+                        "ORA-\(String(number, padding: 5))"
+                }
+            #endif
             throw error  // rethrow with more metadata
+        }
+    }
+
+    /// Runs a transaction for the provided `closure`.
+    ///
+    /// The function lends the connection to the user provided closure. The user can modify the database as they wish.
+    /// If the user provided closure returns successfully, the function will attempt to commit the changes by running a
+    /// `COMMIT` query against the database. If the user provided closure throws an error, the function will attempt to
+    /// rollback the changes made within the closure.
+    ///
+    /// - Parameters:
+    ///   - logger: The `Logger` to log into for the transaction. Defaults to logging disabled.
+    ///   - file: The file, the transaction was started in. Used for better error reporting.
+    ///   - line: The line, the transaction was started in. Used for better error reporting.
+    ///   - closure: The user provided code to modify the database. Use the provided connection to run queries.
+    ///              The connection must stay in the transaction mode. Otherwise this method will throw!
+    /// - Returns: The closure's return value.
+    public func withTransaction<Result>(
+        logger: Logger = OracleConnection.noopLogger,
+        file: String = #file,
+        line: Int = #line,
+        isolation: isolated (any Actor)? = #isolation,
+        _ closure: (inout sending OracleTransactionConnection) async throws -> sending Result
+    ) async throws(OracleTransactionError) -> sending Result {
+        var closureHasFinished: Bool = false
+        do {
+            var conn = OracleTransactionConnection(self)
+            let value = try await closure(&conn)
+            closureHasFinished = true
+            try await self.commit()
+            return value
+        } catch {
+            var transactionError = OracleTransactionError(file: file, line: line)
+            if !closureHasFinished {
+                transactionError.closureError = error
+            } else {
+                transactionError.commitError = error
+            }
+            do {
+                try await self.rollback()
+            } catch {
+                transactionError.rollbackError = error
+            }
+
+            throw transactionError
         }
     }
 }
@@ -539,7 +639,8 @@ extension OracleConnection {
     /// platform.
     ///
     /// This will select the concrete `EventLoopGroup` depending on which platform this is running on.
-    public static var defaultEventLoopGroup: EventLoopGroup {
+    @usableFromInline
+    static var defaultEventLoopGroup: EventLoopGroup {
         #if canImport(Network)
             if #available(OSX 10.14, iOS 12.0, tvOS 12.0, watchOS 6.0, *) {
                 return NIOTSEventLoopGroup.singleton
@@ -551,3 +652,33 @@ extension OracleConnection {
         #endif
     }
 }
+
+#if DistributedTracingSupport
+    extension OracleConnection {
+        @usableFromInline
+        func applyCommonAttributes(
+            to attributes: inout SpanAttributes,
+            querySummary: String,
+            queryText: String
+        ) {
+            attributes[self.configuration.tracing.attributeNames.databaseNamespace] = self.databaseNamespace
+            attributes[self.configuration.tracing.attributeNames.databaseQuerySummary] = querySummary
+            attributes[self.configuration.tracing.attributeNames.databaseQueryText] = queryText
+            attributes[self.configuration.tracing.attributeNames.serverAddress] = configuration.host
+            attributes[self.configuration.tracing.attributeNames.serverPort] = configuration.port
+        }
+    }
+#endif
+
+
+#if _IOTracing
+    extension OracleConnection {
+        public func _ioTracing(enabled: Bool) async throws {
+            try await self.channel.pipeline
+                .handler(type: OracleTraceHandler.self)
+                .get()
+                .shouldLog
+                .store(enabled, ordering: .relaxed)
+        }
+    }
+#endif

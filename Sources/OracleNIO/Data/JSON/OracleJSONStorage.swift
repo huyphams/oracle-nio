@@ -12,8 +12,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-import struct Foundation.Date
+#if canImport(FoundationEssentials)
+    public import FoundationEssentials
+#else
+    public import Foundation
+#endif
 
+@usableFromInline
 enum OracleJSONStorage: Sendable, Equatable {
     /// Containers
     case container([String: OracleJSONStorage])

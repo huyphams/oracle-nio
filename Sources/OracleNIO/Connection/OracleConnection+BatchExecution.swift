@@ -12,7 +12,12 @@
 //
 //===----------------------------------------------------------------------===//
 
-import Logging
+public import Logging
+import NIOCore
+
+#if DistributedTracingSupport
+    import Tracing
+#endif
 
 extension OracleConnection {
     /// Executes the statement multiple times using the specified bind collections without requiring multiple roundtrips to the database.
@@ -29,7 +34,7 @@ extension OracleConnection {
     /// - Returns: A ``OracleBatchExecutionResult`` containing the amount of affected rows and other metadata the server sent.
     ///
     /// Batch execution is useful for inserting or updating multiple rows efficiently when working with large data sets. It significally outperforms
-    /// repeated calls to ``execute(_:options:logger:file:line:)-9uyvp`` by reducing network transfer costs and database overheads.
+    /// repeated calls to ``execute(_:options:logger:file:line:)->OracleRowSequence`` by reducing network transfer costs and database overheads.
     /// It can also be used to execute PL/SQL statements multiple times at once.
     /// ```swift
     /// let binds: [(Int, String, Int)] = [
@@ -45,15 +50,15 @@ extension OracleConnection {
     /// )
     /// ```
     @discardableResult
-    public func executeBatch<each Bind: OracleThrowingDynamicTypeEncodable>(
+    public func execute<each Bind: OracleThrowingDynamicTypeEncodable>(
         _ statement: String,
         binds: [(repeat (each Bind)?)],
         encodingContext: OracleEncodingContext = .default,
         options: StatementOptions = .init(),
-        logger: Logger? = nil,
+        logger: Logger = OracleConnection.noopLogger,
         file: String = #fileID, line: Int = #line
     ) async throws -> OracleBatchExecutionResult {
-        var logger = logger ?? Self.noopLogger
+        var logger = logger
         logger[oracleMetadataKey: .connectionID] = "\(self.id)"
         logger[oracleMetadataKey: .sessionID] = "\(self.sessionID)"
 
@@ -84,7 +89,7 @@ extension OracleConnection {
     /// - Returns: A ``OracleBatchExecutionResult`` containing the amount of affected rows and other metadata the server sent.
     ///
     /// Batch execution is useful for inserting or updating multiple rows efficiently when working with large data sets. It significally outperforms
-    /// repeated calls to ``execute(_:options:logger:file:line:)-9uyvp`` by reducing network transfer costs and database overheads.
+    /// repeated calls to ``execute(_:options:logger:file:line:)->AsyncThrowingMapSequence<OracleRowSequence,Row>`` by reducing network transfer costs and database overheads.
     /// It can also be used to execute PL/SQL statements multiple times at once.
     /// ```swift
     /// try await connection.executeBatch([
@@ -96,17 +101,17 @@ extension OracleConnection {
     /// ])
     /// ```
     @discardableResult
-    public func executeBatch<Statement: OraclePreparedStatement>(
+    public func execute<Statement: OraclePreparedStatement>(
         _ statements: [Statement],
         options: StatementOptions = .init(),
-        logger: Logger? = nil,
+        logger: Logger = OracleConnection.noopLogger,
         file: String = #fileID, line: Int = #line
     ) async throws -> OracleBatchExecutionResult {
         if statements.isEmpty {
             throw OracleSQLError.missingStatement
         }
 
-        var logger = logger ?? Self.noopLogger
+        var logger = logger
         logger[oracleMetadataKey: .connectionID] = "\(self.id)"
         logger[oracleMetadataKey: .sessionID] = "\(self.sessionID)"
 
@@ -132,11 +137,30 @@ extension OracleConnection {
         file: String,
         line: Int
     ) async throws -> OracleBatchExecutionResult {
+        var statementParser = OracleStatement.Parser(currentSQL: statement)
+        try? statementParser.continueParsing(with: statement)
+
+        #if DistributedTracingSupport
+            let span = self.tracer?.startSpan(statementParser.keyword, ofKind: .client)
+            span?.updateAttributes { attributes in
+                self.applyCommonAttributes(
+                    to: &attributes,
+                    querySummary: statementParser.summary.joined(separator: " "),
+                    queryText: statement
+                )
+                attributes[self.configuration.tracing.attributeNames.databaseOperationBatchSize] =
+                    collection.bindings.count
+            }
+            defer { span?.end() }
+        #endif
+
         let promise = self.channel.eventLoop.makePromise(
             of: OracleRowStream.self
         )
         let context = StatementContext(
             statement: statement,
+            keyword: statementParser.keyword,
+            isReturning: statementParser.isReturning,
             bindCollection: collection,
             options: options,
             logger: logger,
@@ -170,6 +194,15 @@ extension OracleConnection {
             error.file = file
             error.line = line
             error.statement = .init(unsafeSQL: statement)
+            #if DistributedTracingSupport
+                span?.recordError(error)
+                span?.setStatus(SpanStatus(code: .error))
+                span?.attributes[self.configuration.tracing.attributeNames.errorType] = error.code.description
+                if let number = error.serverInfo?.number {
+                    span?.attributes[self.configuration.tracing.attributeNames.databaseResponseStatusCode] =
+                        "ORA-\(String(number, padding: 5))"
+                }
+            #endif
             throw error  // rethrow with more metadata
         }
     }

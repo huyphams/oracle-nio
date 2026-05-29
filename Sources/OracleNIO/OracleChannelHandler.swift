@@ -17,7 +17,11 @@ import NIOCore
 import NIOSSL
 import NIOTLS
 
-import class Foundation.ProcessInfo
+#if canImport(FoundationEssentials)
+    import FoundationEssentials
+#else
+    import Foundation
+#endif
 
 final class OracleChannelHandler: ChannelDuplexHandler {
     typealias OutboundIn = OracleTask
@@ -414,7 +418,7 @@ final class OracleChannelHandler: ChannelDuplexHandler {
 
         case .forwardRows(let rows):
             self.rowStream!.receive(rows)
-        case .forwardStreamComplete(let buffer, let cursorID, let affectedRows):
+        case .forwardStreamComplete(let buffer, let cursorID, let affectedRows, let lastRowID):
             guard let rowStream else {
                 // if the stream was cancelled we don't have it here anymore.
                 return
@@ -423,7 +427,7 @@ final class OracleChannelHandler: ChannelDuplexHandler {
             if buffer.count > 0 {
                 rowStream.receive(buffer)
             }
-            rowStream.receive(completion: .success(affectedRows))
+            rowStream.receive(completion: .success(.init(affectedRows: affectedRows, lastRowID: lastRowID)))
 
             if cursorID != 0 {
                 self.cleanupContext.cursorsToClose.insert(cursorID)
@@ -627,15 +631,28 @@ final class OracleChannelHandler: ChannelDuplexHandler {
         context: ChannelHandlerContext
     ) {
         do {
-            try self.encoder.authenticationPhaseTwo(
+            let comboKey = try self.encoder.authenticationPhaseTwo(
                 authContext: authContext, parameters: parameters
             )
+            self.setComboKey(comboKey)
             context.writeAndFlush(
                 self.wrapOutboundOut(self.encoder.flush()), promise: nil
             )
         } catch {
-            context.fireErrorCaught(error)
+            let action =
+                if let error = error as? OracleSQLError {
+                    self.state.errorHappened(error)
+                } else {
+                    self.state.errorHappened(.connectionError(underlying: error))
+                }
+            self.run(action, with: context)
         }
+    }
+
+    /// used for unit testing
+    @inlinable
+    func setComboKey(_ comboKey: [UInt8]?) {
+        self.state.setComboKey(comboKey)
     }
 
     private func authenticated(
@@ -643,15 +660,8 @@ final class OracleChannelHandler: ChannelDuplexHandler {
         context: ChannelHandlerContext
     ) {
         // Did finish starting and authenticating
-        let (
-            version, sessionID, serialNumber
-        ) = getVersionInfo(from: parameters)
-        context.fireUserInboundEventTriggered(
-            OracleSQLEvent.startupDone(
-                version: version,
-                sessionID: sessionID,
-                serialNumber: serialNumber
-            ))
+        let serverContext = self.getServerContext(from: parameters)
+        context.fireUserInboundEventTriggered(OracleSQLEvent.startupDone(serverContext))
         context.fireUserInboundEventTriggered(OracleSQLEvent.readyForStatement)
     }
 
@@ -729,18 +739,20 @@ final class OracleChannelHandler: ChannelDuplexHandler {
                 eventLoop: context.channel.eventLoop,
                 logger: result.logger,
                 affectedRows: nil,
+                lastRowID: nil,
                 rowCounts: result.rowCounts,
                 batchErrors: result.batchErrors
             )
             self.rowStream = rows
             promise.succeed(rows)
 
-        case .noRows(let affectedRows, let columns):
+        case .noRows(let affectedRows, let lastRowID, let columns):
             rows = OracleRowStream(
                 source: .noRows(.success(()), columns),
                 eventLoop: context.channel.eventLoop,
                 logger: result.logger,
                 affectedRows: affectedRows,
+                lastRowID: lastRowID,
                 rowCounts: result.rowCounts,
                 batchErrors: result.batchErrors
             )
@@ -757,10 +769,14 @@ final class OracleChannelHandler: ChannelDuplexHandler {
         _ cleanup: ConnectionStateMachine.ConnectionAction.CleanUpContext,
         context: ChannelHandlerContext
     ) {
-        self.logger.debug(
-            "Cleaning up and closing connection.",
-            metadata: [.error: "\(String(reflecting: cleanup.error))"]
-        )
+        if cleanup.error.code == .clientClosedConnection {
+            self.logger.debug("Cleaning up and closing connection.")
+        } else {
+            self.logger.debug(
+                "Cleaning up and closing connection.",
+                metadata: [.error: "\(String(reflecting: cleanup.error))"]
+            )
+        }
 
         // 1. fail all tasks
         for task in cleanup.tasks {
@@ -790,9 +806,9 @@ final class OracleChannelHandler: ChannelDuplexHandler {
 
     // MARK: - Utility
 
-    private func getVersionInfo(
+    private func getServerContext(
         from parameters: OracleBackendMessage.Parameter
-    ) -> (OracleVersion, Int, Int) {
+    ) -> OracleSQLEvent.StartupContext {
         let version = getVersion(from: parameters)
         guard
             let sessionID = (parameters["AUTH_SESSION_ID"]?.value)
@@ -802,7 +818,14 @@ final class OracleChannelHandler: ChannelDuplexHandler {
         else {
             preconditionFailure()
         }
-        return (version, sessionID, serialNumber)
+        return OracleSQLEvent.StartupContext(
+            version: version,
+            sessionID: sessionID,
+            serialNumber: serialNumber,
+            serviceName: parameters["AUTH_SC_SERVICE_NAME"]?.value,
+            databaseName: parameters["AUTH_DBNAME"]?.value,
+            instanceName: parameters["AUTH_INSTANCENAME"]?.value
+        )
     }
 
     /// Returns the 5-tuple for the database version. Note that the format changed with Oracle Database 18.

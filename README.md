@@ -6,9 +6,7 @@
 [![Documentation](http://img.shields.io/badge/read_the-docs-2196f3.svg)][Documentation]
 [![Apache 2.0 License](https://img.shields.io/badge/license-Apache%202.0-brightgreen)][Apache License]
 [![codecov](https://codecov.io/gh/lovetodream/oracle-nio/graph/badge.svg?token=QIO79P61YM)][Coverage]
-[![CI 23ai](https://github.com/lovetodream/oracle-nio/actions/workflows/test-23ai.yml/badge.svg)][Test 23ai]
-[![CI 21c](https://github.com/lovetodream/oracle-nio/actions/workflows/test-21c.yml/badge.svg)][Test 21c]
-[![CI ADB](https://github.com/lovetodream/oracle-nio/actions/workflows/test-adb.yml/badge.svg)][Test ADB]
+[![CI](https://github.com/lovetodream/oracle-nio/actions/workflows/ci.yml/badge.svg)][CI]
 
 
 
@@ -28,7 +26,19 @@ It's like [PostgresNIO](https://github.com/vapor/postgres-nio), but written for 
 
 ## Supported Oracle Database versions
 
-Oracle Database 12.1 or later.
+Oracle Database 12.1 or later. 
+
+| Version | Release Name | Tested |
+|---|---|---|
+| 12.x | 12c Release | ⚠️ |
+| 18.x | 18c | ✅ |
+| 19.x | 19c Long Term Release | ✅ |
+| 21.x | 21c Innovation Release | ✅ |
+| 23.x | 23ai Long Term Release | ✅ |
+
+⚠️ Requires additional configuration.
+
+> **Note:** Oracle 12c requires Exclusive Mode (`SQLNET.ALLOWED_LOGON_VERSION_SERVER = 12`) to be enabled and all user passwords to be reset afterwards, so that the legacy 10G DES password verifier is removed. Without this, connections will fail with `serverVersionNotSupported`.
 
 ## Connection methods
 
@@ -164,6 +174,7 @@ A type must implement the `OracleDecodable` protocol in order to be decoded from
 - `OracleNumber`
 - `OracleVectorBinary`, `OracleVectorInt8`, `OracleVectorFloat32`, `OracleVectorFloat64`
 - `OracleJSON`
+- `OracleXML`
 - `RowID`
 
 ### Statements with parameters
@@ -225,7 +236,5 @@ _**Swift** is a registered trademark of **Apple, Inc**. Any use of their tradema
 [Documentation]: https://swiftpackageindex.com/lovetodream/oracle-nio/documentation
 [Apache License]: LICENSE
 [Releases]: https://github.com/lovetodream/oracle-nio/releases
-[Test 23ai]: https://github.com/lovetodream/oracle-nio/actions/workflows/test-23ai.yml
-[Test 21c]: https://github.com/lovetodream/oracle-nio/actions/workflows/test-21c.yml
-[Test ADB]: https://github.com/lovetodream/oracle-nio/actions/workflows/test-adb.yml
+[CI]: https://github.com/lovetodream/oracle-nio/actions/workflows/ci.yml
 [Coverage]: https://codecov.io/gh/lovetodream/oracle-nio

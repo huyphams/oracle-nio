@@ -12,7 +12,7 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOSSL
+public import NIOSSL
 
 extension TLSConfiguration {
     /// Creates a mutual TLS configuration for Oracle database connections.
@@ -55,11 +55,11 @@ extension TLSConfiguration {
         let key = try NIOSSLPrivateKey(file: pemFile, format: .pem) { completion in
             completion(pemPassword.utf8)
         }
-        let certificate = try NIOSSLCertificate(file: pemFile, format: .pem)
+        let certificates = try NIOSSLCertificate.fromPEMFile(pemFile)
 
         var tls = TLSConfiguration.makeClientConfiguration()
         tls.privateKey = NIOSSLPrivateKeySource.privateKey(key)
-        tls.certificateChain = [.certificate(certificate)]
+        tls.certificateChain = certificates.map({ .certificate($0) })
 
         return tls
     }

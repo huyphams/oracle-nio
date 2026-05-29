@@ -12,10 +12,15 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
+public import NIOCore
 
-import struct Foundation.Date
+#if canImport(FoundationEssentials)
+    import FoundationEssentials
+#else
+    import Foundation
+#endif
 
+@usableFromInline
 struct OracleJSONParser {
     var flags: UInt16 = 0
     var fieldIDLength = 0
@@ -25,6 +30,7 @@ struct OracleJSONParser {
 
     private init() {}
 
+    @usableFromInline
     static func parse(from buffer: inout ByteBuffer) throws -> OracleJSONStorage {
         var parser = OracleJSONParser()
         return try parser.decode(from: &buffer)
@@ -300,7 +306,7 @@ struct OracleJSONParser {
             return try .double(
                 OracleNumber(
                     from: &bytes, type: .number, context: .default
-                ).requireDouble())
+                ).doubleValue)
         }
 
         // handle integer with length stored inside the node itself
@@ -310,7 +316,7 @@ struct OracleJSONParser {
             return try .double(
                 OracleNumber(
                     from: &bytes, type: .number, context: .default
-                ).requireDouble())
+                ).doubleValue)
         }
 
         // handle string with length stored inside the node itself
