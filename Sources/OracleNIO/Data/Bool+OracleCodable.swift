@@ -12,11 +12,13 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
+public import NIOCore
 
 extension Bool: OracleEncodable {
+    @inlinable
     public static var defaultOracleType: OracleDataType { .boolean }
 
+    @inlinable
     public func encode(
         into buffer: inout ByteBuffer,
         context: OracleEncodingContext
@@ -30,6 +32,7 @@ extension Bool: OracleEncodable {
 }
 
 extension Bool: OracleDecodable {
+    @inlinable
     public init(
         from buffer: inout ByteBuffer,
         type: OracleDataType,

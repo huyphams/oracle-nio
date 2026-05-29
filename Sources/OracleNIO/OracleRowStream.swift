@@ -18,8 +18,12 @@ import NIOCore
 
 struct StatementResult {
     enum Value: Equatable {
-        case noRows(affectedRows: Int, columns: [OracleColumn])
-        case describeInfo([OracleColumn])
+        case noRows(
+            affectedRows: Int,
+            columns: [DescribeInfo.Column],
+            lastRowID: RowID?
+        )
+        case describeInfo([DescribeInfo.Column])
     }
 
     var value: Value
@@ -36,8 +40,8 @@ final class OracleRowStream: @unchecked Sendable {
     >.Source
 
     enum Source {
-        case stream([OracleColumn], OracleRowsDataSource)
-        case noRows(Result<Void, Error>, [OracleColumn])
+        case stream([DescribeInfo.Column], OracleRowsDataSource)
+        case noRows(Result<Void, Error>, [DescribeInfo.Column])
     }
 
     let eventLoop: EventLoop
@@ -65,27 +69,28 @@ final class OracleRowStream: @unchecked Sendable {
 
     final class MetadataListeners {
         private let lock = NIOLock()
-        #if swift(>=5.10)
-            /// This property must only be accessed when ``lock`` is aquired.
-            private nonisolated(unsafe) var affectedRowsListeners: [CheckedContinuation<Int, Error>] = []
-            /// This property must only be accessed when ``lock`` is aquired.
-            private nonisolated(unsafe) var affectedRows: Int?
-            /// This property must only be accessed when ``lock`` is aquired.
-            private nonisolated(unsafe) var error: (any Error)?
-        #else
-            /// This property must only be accessed when ``lock`` is aquired.
-            private var affectedRowsListeners: [CheckedContinuation<Int, Error>] = []
-            /// This property must only be accessed when ``lock`` is aquired.
-            private var affectedRows: Int?
-            /// This property must only be accessed when ``lock`` is aquired.
-            private var error: (any Error)?
-        #endif
+        /// This property must only be accessed when ``lock`` is aquired.
+        private nonisolated(unsafe) var affectedRowsListeners: [CheckedContinuation<Int, Error>] = []
+        /// This property must only be accessed when ``lock`` is aquired.
+        private nonisolated(unsafe) var affectedRows: Int?
+        /// This property must only be accessed when ``lock`` is aquired.
+        private nonisolated(unsafe) var lastRowIDListeners: [CheckedContinuation<RowID?, Error>] = []
+        /// This property must only be accessed when ``lock`` is aquired.
+        private nonisolated(unsafe) var lastRowID: RowID??
+        /// This property must only be accessed when ``lock`` is aquired.
+        private nonisolated(unsafe) var error: (any Error)?
 
         let rowCounts: [Int]?
         let batchErrors: [OracleSQLError.BatchError]?
 
-        init(affectedRows: Int? = nil, rowCounts: [Int]?, batchErrors: [OracleSQLError.BatchError]?) {
+        init(
+            affectedRows: Int? = nil,
+            lastRowID: RowID? = nil,
+            rowCounts: [Int]?,
+            batchErrors: [OracleSQLError.BatchError]?
+        ) {
             self.affectedRows = affectedRows
+            self.lastRowID = lastRowID
             self.rowCounts = rowCounts
             self.batchErrors = batchErrors
         }
@@ -114,6 +119,30 @@ final class OracleRowStream: @unchecked Sendable {
             }
         }
 
+        func addLastRowIDListener(_ listener: CheckedContinuation<RowID?, Error>) {
+            lock.withLock {
+                if let lastRowID {
+                    listener.resume(returning: lastRowID)
+                } else if let error {
+                    listener.resume(throwing: error)
+                } else {
+                    lastRowIDListeners.append(listener)
+                }
+            }
+        }
+
+        func receiveLastRowID(_ rowID: RowID?) {
+            let listeners = lock.withLock {
+                self.lastRowID = .some(rowID)
+                let listeners = self.lastRowIDListeners
+                self.lastRowIDListeners.removeAll()
+                return listeners
+            }
+            for listener in listeners {
+                listener.resume(returning: rowID)
+            }
+        }
+
         func receiveError(_ error: any Error) {
             let affectedRowsListeners = lock.withLock {
                 self.error = error
@@ -127,7 +156,7 @@ final class OracleRowStream: @unchecked Sendable {
         }
     }
 
-    private let rowDescription: [OracleColumn]
+    private let rowDescription: [DescribeInfo.Column]
     private let lookupTable: [String: Int]
     private let listeners: MetadataListeners
     private var downstreamState: DownstreamState
@@ -137,6 +166,7 @@ final class OracleRowStream: @unchecked Sendable {
         eventLoop: EventLoop,
         logger: Logger,
         affectedRows: Int?,
+        lastRowID: RowID?,
         rowCounts: [Int]?,
         batchErrors: [OracleSQLError.BatchError]?
     ) {
@@ -165,7 +195,12 @@ final class OracleRowStream: @unchecked Sendable {
         }
         self.lookupTable = lookup
 
-        self.listeners = MetadataListeners(affectedRows: affectedRows, rowCounts: rowCounts, batchErrors: batchErrors)
+        self.listeners = MetadataListeners(
+            affectedRows: affectedRows,
+            lastRowID: lastRowID,
+            rowCounts: rowCounts,
+            batchErrors: batchErrors
+        )
     }
 
     // MARK: Async Sequence
@@ -452,13 +487,18 @@ final class OracleRowStream: @unchecked Sendable {
         }
     }
 
-    internal func receive(completion result: Result<Int, Error>) {
+    internal struct Success {
+        let affectedRows: Int
+        let lastRowID: RowID?
+    }
+    internal func receive(completion result: Result<Success, Error>) {
         self.eventLoop.preconditionInEventLoop()
 
         switch result {
-        case .success(let affectedRows):
+        case .success(let success):
             self.receiveEnd()
-            self.listeners.receiveAffectedRows(affectedRows)
+            self.listeners.receiveAffectedRows(success.affectedRows)
+            self.listeners.receiveLastRowID(success.lastRowID)
         case .failure(let error):
             self.receiveError(error)
             self.listeners.receiveError(error)
@@ -554,8 +594,4 @@ protocol OracleRowsDataSource {
     func cancel(for stream: OracleRowStream)
 }
 
-#if swift(>=5.10)
-    extension OracleRowStream.MetadataListeners: Sendable {}
-#else
-    extension OracleRowStream.MetadataListeners: @unchecked Sendable {}
-#endif
+extension OracleRowStream.MetadataListeners: Sendable {}

@@ -24,18 +24,20 @@ let configuration = OracleConnection.Configuration(
 // snippet.end
 
 // snippet.makeClient
-let client = OracleClient(configuration: configuration)
+if #available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *) {
+    let client = OracleClient(configuration: configuration)
 // snippet.end
 
 // snippet.run
-await withTaskGroup(of: Void.self) { taskGroup in
-    taskGroup.addTask {
-        await client.run()  // !important
+    await withTaskGroup(of: Void.self) { taskGroup in
+        taskGroup.addTask {
+            await client.run()  // !important
+        }
+
+        // You can use the client while the `client.run()` method is not cancelled.
+
+        // To shutdown the client, cancel its run method, by cancelling the taskGroup.
+        taskGroup.cancelAll()
     }
-
-    // You can use the client while the `client.run()` method is not cancelled.
-
-    // To shutdown the client, cancel its run method, by cancelling the taskGroup.
-    taskGroup.cancelAll()
 }
 // snippet.end

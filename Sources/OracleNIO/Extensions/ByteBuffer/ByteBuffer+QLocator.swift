@@ -12,9 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-import struct NIOCore.ByteBuffer
+public import struct NIOCore.ByteBuffer
 
 extension ByteBuffer {
+    @usableFromInline
     mutating func writeQLocator(dataLength: UInt64) {
         self.writeUB4(40)  // QLocator length
         self.writeInteger(UInt8(40))  // chunk length

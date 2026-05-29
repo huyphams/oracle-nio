@@ -27,18 +27,22 @@ public struct OracleRowSequence: AsyncSequence, Sendable {
 
     let backing: BackingSequence
     let lookupTable: [String: Int]
-    let columns: [OracleColumn]
+    let _columns: [DescribeInfo.Column]
     let listeners: OracleRowStream.MetadataListeners
+
+    public var columns: OracleColumns {
+        OracleColumns(underlying: _columns)
+    }
 
     init(
         _ backing: BackingSequence,
         lookupTable: [String: Int],
-        columns: [OracleColumn],
+        columns: [DescribeInfo.Column],
         listeners: OracleRowStream.MetadataListeners
     ) {
         self.backing = backing
         self.lookupTable = lookupTable
-        self.columns = columns
+        self._columns = columns
         self.listeners = listeners
     }
 
@@ -46,16 +50,16 @@ public struct OracleRowSequence: AsyncSequence, Sendable {
         AsyncIterator(
             backing: self.backing.makeAsyncIterator(),
             lookupTable: self.lookupTable,
-            columns: self.columns
+            columns: self._columns
         )
     }
 
     public func getColumns() -> [[String: Any]] {
-        return columns.map { col in
+        return self._columns.map { column in
             return [
-                "name": col.name,
-                "type": col.dataType.name,
-                "size": col.dataTypeSize
+                "name": column.name,
+                "type": column.dataType.name,
+                "size": column.dataTypeSize
             ]
         }
     }
@@ -67,6 +71,17 @@ public struct OracleRowSequence: AsyncSequence, Sendable {
         get async throws {
             try await withCheckedThrowingContinuation { continuation in
                 listeners.addAffectedRowsListener(continuation)
+            }
+        }
+    }
+
+    /// Receive the last row ID modified by the statement.
+    ///
+    /// The metric is only available after the query has completed, e.g. after all rows are retrieved from the server.
+    public var lastRowID: RowID? {
+        get async throws {
+            try await withCheckedThrowingContinuation { continuation in
+                listeners.addLastRowIDListener(continuation)
             }
         }
     }
@@ -87,7 +102,7 @@ extension OracleRowSequence {
         let backing: BackingSequence.AsyncIterator
 
         let lookupTable: [String: Int]
-        let columns: [OracleColumn]
+        let columns: [DescribeInfo.Column]
 
         public mutating func next() async throws -> OracleRow? {
             guard let dataRow = try await self.backing.next() else {
@@ -105,6 +120,16 @@ extension OracleRowSequence {
 extension OracleRowSequence {
     public func collect() async throws -> [OracleRow] {
         var result = [OracleRow]()
+        for try await row in self {
+            result.append(row)
+        }
+        return result
+    }
+}
+
+extension AsyncThrowingMapSequence where Base == OracleRowSequence {
+    public func collect() async throws -> [Transformed] {
+        var result = [Transformed]()
         for try await row in self {
             result.append(row)
         }

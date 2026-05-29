@@ -12,16 +12,16 @@
 //
 //===----------------------------------------------------------------------===//
 
-#if compiler(>=6.0)
-    import Logging
-    import NIOConcurrencyHelpers
-    import NIOCore
-    import NIOEmbedded
-    import Testing
+import Logging
+import NIOConcurrencyHelpers
+import NIOCore
+import NIOEmbedded
+import Testing
 
-    @testable import OracleNIO
+@testable import OracleNIO
 
-    @Suite final class OracleTraceHandlerTests {
+#if _IOTracing
+    @Suite(.timeLimit(.minutes(5))) final class OracleTraceHandlerTests {
         @Test func tracer() async throws {
             let lines: NIOLockedValueBox<[String]> = .init([])
             let logger = Logger(label: "Tracer") { _ in
@@ -82,18 +82,8 @@
                 }
             }
 
-            func log(
-                level: Logger.Level,
-                message: Logger.Message,
-                metadata: Logger.Metadata?,
-                source: String,
-                file: String,
-                function: String,
-                line: UInt
-            ) {
-                lines.withLockedValue {
-                    $0.append(message.description)
-                }
+            func log(event: LogEvent) {
+                lines.withLockedValue { $0.append(event.message.description) }
             }
         }
     }

@@ -12,9 +12,10 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
+public import NIOCore
 
 extension ByteBuffer {
+    @inlinable
     mutating func throwingReadInteger<T: FixedWidthInteger>(
         endianness: Endianness = .big,
         as: T.Type = T.self,
@@ -31,6 +32,7 @@ extension ByteBuffer {
         return result
     }
 
+    @inlinable
     func throwingGetInteger<T: FixedWidthInteger>(
         at index: Int,
         endianness: Endianness = .big,

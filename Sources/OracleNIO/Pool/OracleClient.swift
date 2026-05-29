@@ -13,10 +13,10 @@
 //===----------------------------------------------------------------------===//
 
 import Atomics
-import Logging
-import NIOCore
-import ServiceLifecycle
-import _ConnectionPoolModule
+public import Logging
+public import NIOCore
+public import ServiceLifecycle
+public import _OracleConnectionPoolModule
 
 /// A Oracle client that is backed by an underlying connection pool. Use ``Options`` to change the
 /// client's behavior and ``OracleConnection/Configuration`` to configure its connections.
@@ -67,7 +67,7 @@ public final class OracleClient: Sendable, Service {
         /// demand. Default to `0`.
         ///
         /// If the open connection count becomes less than ``minimumConnections`` new connections
-        /// are created immidiatly. Must be greater or equal to zero and less than ``maximumConnections``.
+        /// are created immediately. Must be greater or equal to zero and less than ``maximumConnections``.
         ///
         /// Idle connections are kept alive using the ``keepAliveBehavior``.
         public var minimumConnections: Int = 0
@@ -117,42 +117,22 @@ public final class OracleClient: Sendable, Service {
     ///   - drcp: Whether the database server supports `DRCP` (Database Resident Connection Pooling) or not.
     ///           Defaults to `true`. More information on `DRCP` can be found
     ///           [here](https://www.oracle.com/docs/tech/drcp-technical-brief.pdf).
-    ///   - eventLoopGroup: The underlying NIO `EventLoopGroup`. Defaults to ``defaultEventLoopGroup``.
-    public convenience init(
-        configuration: OracleConnection.Configuration,
-        options: Options = .init(),
-        drcp: Bool = true,
-        eventLoopGroup: any EventLoopGroup = OracleClient.defaultEventLoopGroup
-    ) {
-        self.init(
-            configuration: configuration,
-            options: options,
-            drcp: drcp,
-            eventLoopGroup: eventLoopGroup,
-            backgroundLogger: OracleConnection.noopLogger
-        )
-    }
-
-    /// Creates a new ``OracleClient``. Don't forget to run ``run()`` the client in a long running task.
-    /// - Parameters:
-    ///   - configuration: The client's configuration. See ``OracleConnection/Configuration``
-    ///   - options: The pool configuration. See ``Options``
-    ///   - drcp: Whether the database server supports `DRCP` (Database Resident Connection Pooling) or not.
-    ///           Defaults to `true`. More information on `DRCP` can be found
-    ///           [here](https://www.oracle.com/docs/tech/drcp-technical-brief.pdf).
-    ///   - eventLoopGroup: The underlying NIO `EventLoopGroup`. Defaults to ``defaultEventLoopGroup``.
+    ///   - eventLoopGroup: The underlying NIO `EventLoopGroup`. Defaults to `defaultEventLoopGroup`.
     ///   - backgroundLogger: A `swift-log` `Logger` to log background messages to. A copy of this logger is also
-    ///                       forwarded to the created connections as a background logger.
+    ///                       forwarded to the created connections as a background logger. Defaults to logging disabled
     public init(
         configuration: OracleConnection.Configuration,
         options: Options = .init(),
         drcp: Bool = true,
         eventLoopGroup: any EventLoopGroup = OracleClient.defaultEventLoopGroup,
-        backgroundLogger: Logger
+        backgroundLogger: Logger = OracleConnection.noopLogger
     ) {
         let factory = ConnectionFactory(
-            config: configuration, drcp: drcp, eventLoopGroup: eventLoopGroup,
-            logger: backgroundLogger)
+            config: configuration,
+            drcp: drcp,
+            eventLoopGroup: eventLoopGroup,
+            logger: backgroundLogger
+        )
         self.factory = factory
         self.backgroundLogger = backgroundLogger
 
@@ -176,18 +156,23 @@ public final class OracleClient: Sendable, Service {
     /// - Parameter closure: A closure that uses the passed `OracleConnection`. The closure **must not** capture
     ///                      the provided `OracleConnection`.
     /// - Returns: The closure's return value.
-    public func withConnection<Result>(_ closure: (OracleConnection) async throws -> Result)
-        async throws -> Result
-    {
-        let connection = try await self.leaseConnection()
+    public func withConnection<Result>(
+        isolation: isolated (any Actor)? = #isolation,
+        _ closure: (inout sending PooledConnection) async throws -> sending Result
+    ) async throws -> sending Result {
+        let lease = try await self.leaseConnection()
 
-        defer { self.pool.releaseConnection(connection) }
+        defer { lease.release() }
 
-        return try await OracleEncodingContext.$jsonMaximumFieldNameSize.withValue(
-            connection.serverVersion.majorDatabaseReleaseNumber >= 23 ? 65535 : 255
+        let box: SendOnceBox<Result> = .init()
+        try await OracleEncodingContext.$jsonMaximumFieldNameSize.withValue(
+            lease.connection.serverVersion.majorDatabaseReleaseNumber >= 23 ? 65535 : 255
         ) {
-            return try await closure(connection)
+            var connection = PooledConnection(lease.connection)
+            let value = try await closure(&connection)
+            box.set(value)
         }
+        return box.take()
     }
 
     /// Lease a connection in the context of an isolated transaction for the provided `closure`'s lifetime.
@@ -195,22 +180,22 @@ public final class OracleClient: Sendable, Service {
     /// - Note: If the closure does not fail, all changes will be committed via `COMMIT`.
     ///         If the closure throws, a `ROLLBACK` will be issued, the original error rethrows.
     ///
-    /// - Parameter closure: A closure that uses the passed `OracleConnection`. The closure **must not** capture
-    ///                      the provided `OracleConnection`.
+    /// - Parameters:
+    ///   - logger: The `Logger` to log into for the transaction. Defaults to logging disabled
+    ///   - file: The file, the transaction was started in. Used for better error reporting.
+    ///   - line: The line, the transaction was started in. Used for better error reporting.
+    ///   - closure: A closure that uses the passed ``OracleTransactionConnection``.
     /// - Returns: The closure's return value.
     @discardableResult
     public func withTransaction<Result>(
-        _ closure: (OracleConnection) async throws -> Result
-    ) async throws -> Result {
-        try await self.withConnection { connection in
-            do {
-                let result = try await closure(connection)
-                try await connection.commit()
-                return result
-            } catch {
-                try await connection.rollback()
-                throw error
-            }
+        logger: Logger = OracleConnection.noopLogger,
+        file: String = #file,
+        line: Int = #line,
+        isolation: isolated (any Actor)? = #isolation,
+        _ closure: (inout sending OracleTransactionConnection) async throws -> sending Result
+    ) async throws -> sending Result {
+        try await self._withConnection { connection in
+            try await connection.withTransaction(logger: logger, file: file, line: line, closure)
         }
     }
 
@@ -218,7 +203,7 @@ public final class OracleClient: Sendable, Service {
     /// The client's run method. Users must call this function in order to start the client's background task processing
     /// like creating and destroying connections and running timers.
     ///
-    /// Calls to ``withConnection(_:)`` will emit a `logger` warning, if ``run()`` hasn't been called previously.
+    /// Calls to ``withConnection(isolation:_:)`` will emit a `logger` warning, if ``run()`` hasn't been called previously.
     public func run() async {
         let atomicOp = self.runningAtomic.compareExchange(
             expected: false, desired: true, ordering: .relaxed)
@@ -232,7 +217,7 @@ public final class OracleClient: Sendable, Service {
 
     // MARK: - Private Methods -
 
-    private func leaseConnection() async throws -> OracleConnection {
+    private func leaseConnection() async throws -> ConnectionLease<OracleConnection> {
         if !self.runningAtomic.load(ordering: .relaxed) {
             self.backgroundLogger.warning(
                 "Trying to lease connection from `OracleClient`, but `OracleClient.run()` hasn't been called yet."
@@ -241,10 +226,29 @@ public final class OracleClient: Sendable, Service {
         return try await self.pool.leaseConnection()
     }
 
+    private func _withConnection<Result>(
+        isolation: isolated (any Actor)? = #isolation,
+        _ closure: (OracleConnection) async throws -> sending Result
+    ) async throws -> sending Result {
+        let lease = try await self.leaseConnection()
+
+        defer { lease.release() }
+
+        let box: SendOnceBox<Result> = .init()
+        try await OracleEncodingContext.$jsonMaximumFieldNameSize.withValue(
+            lease.connection.serverVersion.majorDatabaseReleaseNumber >= 23 ? 65535 : 255
+        ) {
+            let value = try await closure(lease.connection)
+            box.set(value)
+        }
+        return box.take()
+    }
+
     /// Returns the default `EventLoopGroup` singleton, automatically selecting the best for the platform.
     ///
     /// This will select the concrete `EventLoopGroup` depending which platform this is running on.
-    public static var defaultEventLoopGroup: EventLoopGroup {
+    @usableFromInline
+    static var defaultEventLoopGroup: EventLoopGroup {
         OracleConnection.defaultEventLoopGroup
     }
 }
@@ -280,10 +284,14 @@ extension ConnectionPoolConfiguration {
 }
 
 extension OracleConnection: PooledConnection {
+    @_documentation(visibility: internal)
+    @_disfavoredOverload
     public func onClose(_ closure: @escaping @Sendable ((Error)?) -> Void) {
         self.closeFuture.whenComplete { _ in closure(nil) }
     }
 
+    @_documentation(visibility: internal)
+    @_disfavoredOverload
     public func close() {
         self.channel.close(mode: .all, promise: nil)
     }

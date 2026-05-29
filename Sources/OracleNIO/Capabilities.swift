@@ -12,10 +12,11 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
+public import NIOCore
 
 /// Defining the capabilities (negotiated at connect time) that both
 /// the database server and the client are capable of.
+@usableFromInline
 struct Capabilities: Sendable, Hashable {
     var protocolVersion: UInt16 = 0
     var protocolOptions: UInt16 = 0
@@ -40,7 +41,7 @@ struct Capabilities: Sendable, Hashable {
             Constants.TNS_CCAP_O5LOGON | Constants.TNS_CCAP_O5LOGON_NP | Constants.TNS_CCAP_O7LOGON
             | Constants.TNS_CCAP_O8LOGON_LONG_IDENTIFIER | Constants.TNS_CCAP_O9LOGON_LONG_PASSWORD
         self.compileCapabilities[Constants.TNS_CCAP_FEATURE_BACKPORT] =
-            Constants.TNS_CCAP_CTB_IMPLICIT_POOL
+            Constants.TNS_CCAP_CTB_IMPLICIT_POOL | Constants.TNS_CCAP_CTB_OAUTH_MSG_ON_ERR
         self.compileCapabilities[Constants.TNS_CCAP_FIELD_VERSION] = self.ttcFieldVersion
         self.compileCapabilities[Constants.TNS_CCAP_SERVER_DEFINE_CONV] = 1
         self.compileCapabilities[Constants.TNS_CCAP_TTC1] =
@@ -80,6 +81,7 @@ struct Capabilities: Sendable, Hashable {
     }
 
     /// Decodes Capabilities from a buffer created with ``encode(into:)``.
+    @usableFromInline
     init(from buffer: inout ByteBuffer) throws {
         self.protocolVersion = try buffer.throwingReadInteger()
         self.protocolOptions = try buffer.throwingReadInteger()

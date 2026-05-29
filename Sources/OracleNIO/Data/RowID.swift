@@ -12,23 +12,30 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
+public import NIOCore
 
 public struct RowID: CustomStringConvertible, Sendable, Equatable, Hashable {
     public let description: String
 
-    init(
+    init(_ value: String) {
+        self.description = value
+    }
+
+    init?(
         rba: UInt32,
         partitionID: UInt16,
         blockNumber: UInt32,
         slotNumber: UInt16
     ) {
-        self.description = Self.makeDescription(
-            rba: rba,
-            partitionID: partitionID,
-            blockNumber: blockNumber,
-            slotNumber: slotNumber
-        )
+        guard
+            let value = Self.makeDescription(
+                rba: rba,
+                partitionID: partitionID,
+                blockNumber: blockNumber,
+                slotNumber: slotNumber
+            )
+        else { return nil }
+        self.description = value
     }
 
     private static func makeDescription(
@@ -36,7 +43,7 @@ public struct RowID: CustomStringConvertible, Sendable, Equatable, Hashable {
         partitionID: UInt16,
         blockNumber: UInt32,
         slotNumber: UInt16
-    ) -> String {
+    ) -> String? {
         if rba != 0 || partitionID != 0 || blockNumber != 0 || slotNumber != 0 {
             var bytes = [UInt8](
                 repeating: 0, count: Constants.TNS_MAX_ROWID_LENGTH
@@ -68,7 +75,7 @@ public struct RowID: CustomStringConvertible, Sendable, Equatable, Hashable {
             )
             return String(decoding: bytes, as: UTF8.self)
         }
-        return ""
+        return nil
     }
 
     private static func convertBase64(
@@ -88,6 +95,22 @@ public struct RowID: CustomStringConvertible, Sendable, Equatable, Hashable {
 }
 
 extension RowID: OracleDecodable {
+    /// Since RowID is represented differently when received (either binary or b64 encoded string), we want to unify it here.
+    init?(fromWire buffer: inout ByteBuffer) throws {
+        let rba = try buffer.throwingReadUB4()
+        let partitionID = try buffer.throwingReadUB2()
+        buffer.moveReaderIndex(forwardBy: 1)
+        let blockNumber = try buffer.throwingReadUB4()
+        let slotNumber = try buffer.throwingReadUB2()
+        self.init(
+            rba: rba,
+            partitionID: partitionID,
+            blockNumber: blockNumber,
+            slotNumber: slotNumber
+        )
+    }
+
+    @inlinable
     public init(
         from buffer: inout ByteBuffer,
         type: OracleDataType,
@@ -95,17 +118,10 @@ extension RowID: OracleDecodable {
     ) throws {
         switch type {
         case .rowID:
-            let rba = try buffer.throwingReadUB4()
-            let partitionID = try buffer.throwingReadUB2()
-            buffer.moveReaderIndex(forwardBy: 1)
-            let blockNumber = try buffer.throwingReadUB4()
-            let slotNumber = try buffer.throwingReadUB2()
-            self = RowID(
-                rba: rba,
-                partitionID: partitionID,
-                blockNumber: blockNumber,
-                slotNumber: slotNumber
-            )
+            guard let value = buffer.readString(length: buffer.readableBytes) else {
+                throw OracleDecodingError.Code.missingData
+            }
+            self.description = value
         default:
             throw OracleDecodingError.Code.typeMismatch
         }
@@ -113,8 +129,10 @@ extension RowID: OracleDecodable {
 }
 
 extension RowID: OracleEncodable {
+    @inlinable
     public static var defaultOracleType: OracleDataType { .rowID }
 
+    @inlinable
     public func encode(
         into buffer: inout ByteBuffer,
         context: OracleEncodingContext

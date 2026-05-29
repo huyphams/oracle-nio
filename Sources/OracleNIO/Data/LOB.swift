@@ -13,7 +13,7 @@
 //===----------------------------------------------------------------------===//
 
 import NIOConcurrencyHelpers
-import NIOCore
+public import NIOCore
 
 /// A LOB holds a reference to CLOB/BLOB data on an Oracle connection.
 ///
@@ -87,7 +87,9 @@ public final class LOB: Sendable {
     let locator: NIOLockedValueBox<[UInt8]>
     private let hasMetadata: Bool
 
-    public static let defaultOracleType: OracleDataType = .blob
+    @inlinable
+    public static var defaultOracleType: OracleDataType { .blob }
+
     public let oracleType: OracleDataType
 
     init(

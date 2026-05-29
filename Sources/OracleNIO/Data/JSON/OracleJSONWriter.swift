@@ -12,8 +12,9 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
+public import NIOCore
 
+@usableFromInline
 struct OracleJSONWriter {
     var maxFieldNameSize: Int = 255
     var fieldNames: [String: FieldName] = [:]
@@ -21,6 +22,10 @@ struct OracleJSONWriter {
     var longFieldNamesSegment: FieldNameSegment?
     var fieldIDSize = 0
 
+    @usableFromInline
+    init() {}
+
+    @usableFromInline
     mutating func encode(
         _ value: OracleJSONStorage, into buffer: inout ByteBuffer, maxFieldNameSize: Int
     ) throws {

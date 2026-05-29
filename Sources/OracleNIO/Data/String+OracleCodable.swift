@@ -12,14 +12,21 @@
 //
 //===----------------------------------------------------------------------===//
 
-import NIOCore
+public import NIOCore
+
+#if canImport(FoundationEssentials)
+    import FoundationEssentials
+#else
+    import Foundation
+#endif
 
 extension String: OracleEncodable {
+    @inlinable
     public func encode(
         into buffer: inout ByteBuffer,
         context: OracleEncodingContext
     ) {
-        preconditionFailure("This should not be called")
+        ByteBuffer(string: self)._encodeRaw(into: &buffer, context: context)
     }
 
     @inlinable
@@ -27,12 +34,13 @@ extension String: OracleEncodable {
         into buffer: inout ByteBuffer,
         context: OracleEncodingContext
     ) {
-        ByteBuffer(string: self)
-            ._encodeRaw(into: &buffer, context: context)
+        self.encode(into: &buffer, context: context)
     }
 
+    @inlinable
     public static var defaultOracleType: OracleDataType { .varchar }
 
+    @inlinable
     public var size: UInt32 {
         // empty strings have a length of 1
         // (they're basically the same as null in a oracle db)
@@ -55,6 +63,7 @@ extension String: OracleDecodable {
         return try self.init(from: &buffer, type: type, context: context)
     }
 
+    @inlinable
     public init(
         from buffer: inout ByteBuffer,
         type: OracleDataType,
@@ -65,9 +74,16 @@ extension String: OracleDecodable {
             if type.csfrm == Constants.TNS_CS_IMPLICIT || type.csfrm == 0 {
                 self = buffer.readString(length: buffer.readableBytes)!
             } else {
-                self = buffer.readString(
-                    length: buffer.readableBytes, encoding: .utf16
-                )!
+                let bytes = buffer.readBytes(length: buffer.readableBytes).unsafelyUnwrapped
+                guard bytes.count % 2 == 0 else {
+                    throw OracleDecodingError.Code.failure
+                }
+                var utf16: [Unicode.UTF16.CodeUnit] = []
+                for index in stride(from: 0, to: bytes.count, by: 2) {
+                    let value = (UInt16(bytes[index]) << 8) | UInt16(bytes[index + 1])
+                    utf16.append(value)
+                }
+                self = String(decoding: utf16, as: UTF16.self)
             }
         case .rowID:
             self = try RowID(from: &buffer, type: type, context: context)
