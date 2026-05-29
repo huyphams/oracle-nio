@@ -18,7 +18,7 @@ struct ConnectMessage: ServerMessage {
     func serialize() throws -> ByteBuffer {
         try ByteBuffer(
             plainHexEncodedBytes: """
-                00 3D 00 00 02 00 00 00
+                00 3D 00 00 02 00 00 00        
                 01 3F 00 01 00 00 00 00
                 01 00 00 00 00 3D C5 00
                 00 00 00 00 00 00 00 00

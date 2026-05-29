@@ -14,9 +14,9 @@ jobs:
   soundness:
     container:
       image: swift:jammy
-
+  
     runs-on: ubuntu-latest
-
+    
     steps:
     - uses: actions/checkout@v4
     - name: Mark repo safe in non-fake global config
@@ -28,7 +28,7 @@ jobs:
 
   api-breakage:
     # broken in gh actions?
-    if: github.event_name == 'pull_requesta'
+    if: github.event_name == 'pull_requesta' 
     runs-on: ubuntu-latest
     steps:
       - name: Checkout

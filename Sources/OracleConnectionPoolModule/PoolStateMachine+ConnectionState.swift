@@ -349,7 +349,7 @@ extension PoolStateMachine {
 
             case .idle(_,_,_, .none):
                 return nil
-
+                
             case .leased, .draining, .closing, .closed:
                 return nil
             }

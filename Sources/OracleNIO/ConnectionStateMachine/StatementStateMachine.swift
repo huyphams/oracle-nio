@@ -332,11 +332,7 @@ struct StatementStateMachine {
                     action = .succeedStatement(
                         promise,
                         .init(
-                            value: .noRows(
-                                affectedRows: error.rowCount,
-                                columns: [],
-                                lastRowID: error.rowID
-                            ),
+                            value: .noRows(affectedRows: error.rowCount, columns: [], lastRowID: error.rowID),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: nil,
@@ -360,10 +356,7 @@ struct StatementStateMachine {
                         promise,
                         .init(
                             value: .noRows(
-                                affectedRows: error.rowCount,
-                                columns: describeInfo.columns,
-                                lastRowID: error.rowID
-                            ),
+                                affectedRows: error.rowCount, columns: describeInfo.columns, lastRowID: error.rowID),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: nil,
@@ -386,11 +379,7 @@ struct StatementStateMachine {
                     action = .succeedStatement(
                         promise,
                         .init(
-                            value: .noRows(
-                                affectedRows: error.rowCount,
-                                columns: [],
-                                lastRowID: error.rowID
-                            ),
+                            value: .noRows(affectedRows: error.rowCount, columns: [], lastRowID: error.rowID),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: rowCounts,
@@ -493,11 +482,7 @@ struct StatementStateMachine {
                     action = .succeedStatement(
                         promise,
                         StatementResult(
-                            value: .noRows(
-                                affectedRows: error.rowCount,
-                                columns: [],
-                                lastRowID: error.rowID
-                            ),
+                            value: .noRows(affectedRows: error.rowCount, columns: [], lastRowID: error.rowID),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: nil,
@@ -518,11 +503,7 @@ struct StatementStateMachine {
                     action = .succeedStatement(
                         promise,
                         StatementResult(
-                            value: .noRows(
-                                affectedRows: error.rowCount,
-                                columns: [],
-                                lastRowID: error.rowID
-                            ),
+                            value: .noRows(affectedRows: error.rowCount, columns: [], lastRowID: error.rowID),
                             logger: context.logger,
                             batchErrors: batchErrors,
                             rowCounts: rowCounts,

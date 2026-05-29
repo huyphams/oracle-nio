@@ -25,9 +25,7 @@ import Testing
         let query: OracleStatement = "DELETE FROM table"
         let queryContext = StatementContext(statement: query, promise: promise)
 
-        let result = StatementResult(
-            value: .noRows(affectedRows: 0, columns: [], lastRowID: nil)
-        )
+        let result = StatementResult(value: .noRows(affectedRows: 0, columns: [], lastRowID: nil))
         let backendError = BackendError(
             number: 0, cursorID: 6, position: 0, rowCount: 0, isWarning: false, message: nil,
             rowID: nil, batchErrors: [])

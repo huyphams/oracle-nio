@@ -510,33 +510,33 @@ struct PreparedStatementsOracleNIOTests {
             """#,
             expandedSource: #"""
             struct MyStatement {
-
+            
                 struct Row {
                     var id: UUID
                     var name: String
                     var age: Int
                 }
-
+            
                 static let sql = """
                 SELECT id, name, age
                 FROM users
                 WHERE :1 > age
                 """
-
+            
                 var age: Int
-
+            
                 func makeBindings() throws -> OracleBindings {
                     var bindings = OracleBindings(capacity: 1)
                     bindings.append(age)
                     return bindings
                 }
-
+            
                 func decodeRow(_ row: OracleRow) throws -> Row {
                     let (id, name, age) = try row.decode((UUID, String, Int).self)
                     return Row(id: id, name: name, age: age)
                 }
             }
-
+            
             extension MyStatement: OraclePreparedStatement {
             }
             """#,
@@ -569,22 +569,22 @@ struct PreparedStatementsOracleNIOTests {
             """#,
             expandedSource: #"""
             struct MyStatement {
-
+            
                 struct Row {
                     var names: [String]
                     var memberOf: [Int]?
                 }
-
+            
                 static let sql = """
                 SELECT names, memberOf
                 WHERE names = :1 OR memberOf = :2
                 FROM groups
                 """
-
+            
                 var names: [String]
-
+            
                 var memberOf: [Int]?
-
+            
                 func makeBindings() throws -> OracleBindings {
                     var bindings = OracleBindings(capacity: 2)
                     bindings.append(names)
@@ -595,13 +595,13 @@ struct PreparedStatementsOracleNIOTests {
                     }
                     return bindings
                 }
-
+            
                 func decodeRow(_ row: OracleRow) throws -> Row {
                     let (names, memberOf) = try row.decode(([String], [Int]?).self)
                     return Row(names: names, memberOf: memberOf)
                 }
             }
-
+            
             extension MyStatement: OraclePreparedStatement {
             }
             """#,

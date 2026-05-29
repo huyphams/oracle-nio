@@ -88,7 +88,7 @@ struct SelectAliasReservedNameWorksQuery {}
 
 @Statement(
     """
-    SELECT \("1", Int.self, as: "start")
+    SELECT \("1", Int.self, as: "start") 
     FROM dual
     """)
 struct SelectAliasReservedNameMultilineWorksQuery {}

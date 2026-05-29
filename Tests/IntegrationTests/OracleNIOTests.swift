@@ -1029,7 +1029,7 @@ final class OracleNIOTests {
         let shuffled = (1...10).shuffled()
         try await conn.execute(
             """
-            DECLARE
+            DECLARE 
                 TYPE id_array IS TABLE OF NUMBER;
                 ids id_array := id_array(\(list: shuffled.map(OracleNumber.init)));
             BEGIN

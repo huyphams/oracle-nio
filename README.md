@@ -26,7 +26,7 @@ It's like [PostgresNIO](https://github.com/vapor/postgres-nio), but written for 
 
 ## Supported Oracle Database versions
 
-Oracle Database 12.1 or later.
+Oracle Database 12.1 or later. 
 
 | Version | Release Name | Tested |
 |---|---|---|
@@ -87,7 +87,7 @@ To create a connection, first create a connection configuration object:
 import OracleNIO
 
 let config = OracleConnection.Configuration(
-    host: "127.0.0.1",
+    host: "127.0.0.1", 
     port: 1521,
     service: .serviceName("my_service"), // or .sid("sid")
     username: "my_username",
@@ -112,7 +112,7 @@ import Logging
 let logger = Logger(label: "oracle-logger")
 
 let config = OracleConnection.Configuration(
-    host: "127.0.0.1",
+    host: "127.0.0.1", 
     port: 1521,
     service: .serviceName("my_service"),
     username: "my_username",
@@ -187,7 +187,7 @@ let username = "fancyuser"
 let birthday = Date()
 try await connection.execute("""
   INSERT INTO users (id, username, birthday) VALUES (\(id), \(username), \(birthday))
-  """,
+  """, 
   logger: logger
 )
 ```

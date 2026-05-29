@@ -18,11 +18,7 @@ import NIOCore
 
 struct StatementResult {
     enum Value: Equatable {
-        case noRows(
-            affectedRows: Int,
-            columns: [DescribeInfo.Column],
-            lastRowID: RowID?
-        )
+        case noRows(affectedRows: Int, columns: [DescribeInfo.Column], lastRowID: RowID?)
         case describeInfo([DescribeInfo.Column])
     }
 
