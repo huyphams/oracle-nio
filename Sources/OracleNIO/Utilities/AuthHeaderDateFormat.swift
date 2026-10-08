@@ -21,7 +21,7 @@
 func authHeaderDate(for date: Date) -> String {
     var calendar = Calendar.current
     calendar.locale = Locale(identifier: "en_US_POSIX")
-    calendar.timeZone = .gmt
+    calendar.timeZone = TimeZone(secondsFromGMT: 0)!
     let components = calendar.dateComponents([.weekday, .day, .month, .year, .hour, .minute, .second], from: date)
 
 

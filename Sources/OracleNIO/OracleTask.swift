@@ -16,7 +16,6 @@ import Atomics
 import Logging
 import NIOConcurrencyHelpers
 import NIOCore
-import RegexBuilder
 
 enum OracleTask: Sendable {
     case statement(StatementContext)

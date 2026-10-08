@@ -13,7 +13,6 @@
 //===----------------------------------------------------------------------===//
 
 import Crypto
-import RegexBuilder
 import _CryptoExtras
 
 #if canImport(FoundationEssentials)

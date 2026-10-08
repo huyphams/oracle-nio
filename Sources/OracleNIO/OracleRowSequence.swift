@@ -54,6 +54,16 @@ public struct OracleRowSequence: AsyncSequence, Sendable {
         )
     }
 
+    public func getColumns() -> [[String: Any]] {
+        return self._columns.map { column in
+            return [
+                "name": column.name,
+                "type": column.dataType.name,
+                "size": column.dataTypeSize
+            ]
+        }
+    }
+
     /// Receive the total number of rows affected by the operation.
     ///
     /// The metric is only available after the query has completed, e.g. after all rows are retrieved from the server.

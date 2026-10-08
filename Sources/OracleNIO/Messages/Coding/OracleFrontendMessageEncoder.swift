@@ -360,7 +360,7 @@ struct OracleFrontendMessageEncoder {
                 self.writeKeyValuePair(key: "AUTH_TOKEN", value: token)
             case .tokenAndPrivateKey(let token, let key):
                 self.writeKeyValuePair(key: "AUTH_TOKEN", value: token)
-                let now = authHeaderDate(for: .now)
+                let now = authHeaderDate(for: Date())
                 let hostInfo = """
                     \(authContext.peerAddress?.ipAddress ?? ""):\
                     \(authContext.peerAddress?.port ?? 0)

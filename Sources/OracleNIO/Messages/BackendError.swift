@@ -45,7 +45,7 @@ struct BackendError: OracleBackendMessage.PayloadDecodable, Hashable, Sendable {
         try buffer.throwingSkipUB2()
         let errorMessage: String? =
             if number != 0 && length > 0 {
-                try buffer.readString().replacing(/(^\s+|\s+$)/, with: "")
+                try buffer.readString().trimmingCharacters(in: .whitespacesAndNewlines)
             } else {
                 nil
             }
@@ -129,7 +129,7 @@ struct BackendError: OracleBackendMessage.PayloadDecodable, Hashable, Sendable {
                 let errorMessage =
                     try buffer
                     .readString()
-                    .replacing(/(^\s+|\s+$)/, with: "")
+                    .trimmingCharacters(in: .whitespacesAndNewlines)
                 batch[Int(i)].message = errorMessage
                 try buffer.throwingMoveReaderIndex(forwardBy: 2)  // ignore end marker
             }
@@ -146,7 +146,7 @@ struct BackendError: OracleBackendMessage.PayloadDecodable, Hashable, Sendable {
 
         let errorMessage: String? =
             if number != 0 {
-                try buffer.readString().replacing(/(^\s+|\s+$)/, with: "")
+                try buffer.readString().trimmingCharacters(in: .whitespacesAndNewlines)
             } else {
                 nil
             }

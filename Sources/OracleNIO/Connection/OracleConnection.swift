@@ -412,7 +412,9 @@ extension OracleConnection: OracleConnectionProtocol {
                 // only final attempt throws the error
             }
             if configuration.retryDelay > 0 {
-                try await Task.sleep(for: .seconds(configuration.retryDelay))
+                if #available(macOS 13.0, iOS 16.0, *) {
+                    try await Task.sleep(for: .seconds(configuration.retryDelay))
+                }
             }
         }
         return try await self.connect(

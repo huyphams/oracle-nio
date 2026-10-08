@@ -416,7 +416,14 @@ extension String {
 }
 
 private func sanitize(value: String) -> String {
-    return value.replacing(/\(|\)|\=/, with: "?")
+    String(value.map { character in
+        switch character {
+        case "(", ")", "=":
+            "?"
+        default:
+            character
+        }
+    })
 }
 
 public struct OracleAccessToken: Sendable, Equatable {

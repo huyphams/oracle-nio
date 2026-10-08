@@ -242,3 +242,73 @@ extension ByteBuffer {
         return true
     }
 }
+
+public struct CustomOracleObject: OracleDecodable {
+    public let typeOID: ByteBuffer
+    public let oid: ByteBuffer
+    public let snapshot: ByteBuffer
+    public let data: ByteBuffer
+
+    init(
+        typeOID: ByteBuffer,
+        oid: ByteBuffer,
+        snapshot: ByteBuffer,
+        data: ByteBuffer
+    ) {
+        self.typeOID = typeOID
+        self.oid = oid
+        self.snapshot = snapshot
+        self.data = data
+    }
+
+    public static func _decodeRaw(
+        from buffer: inout ByteBuffer?,
+        type: OracleDataType,
+        context: OracleDecodingContext
+    ) throws -> CustomOracleObject {
+        guard var buffer else {
+            throw OracleDecodingError.Code.missingData
+        }
+        return try self.init(from: &buffer, type: type, context: context)
+    }
+
+    public init(
+        from buffer: inout ByteBuffer,
+        type: OracleDataType,
+        context: OracleDecodingContext
+    ) throws {
+        switch type {
+        case .object:
+            let typeOID =
+                if try buffer.throwingReadUB4() > 0 {
+                    try buffer.throwingReadOracleSpecificLengthPrefixedSlice()
+                } else {
+                    ByteBuffer()
+                }
+            let oid =
+                if try buffer.throwingReadUB4() > 0 {
+                    try buffer.throwingReadOracleSpecificLengthPrefixedSlice()
+                } else {
+                    ByteBuffer()
+                }
+            let snapshot =
+                if try buffer.throwingReadUB4() > 0 {
+                    try buffer.throwingReadOracleSpecificLengthPrefixedSlice()
+                } else {
+                    ByteBuffer()
+                }
+            buffer.skipUB2()  // version
+            let dataLength = try buffer.throwingReadUB4()
+            buffer.skipUB2()  // flags
+            let data =
+                if dataLength > 0 {
+                    try buffer.throwingReadOracleSpecificLengthPrefixedSlice()
+                } else {
+                    ByteBuffer()
+                }
+            self.init(typeOID: typeOID, oid: oid, snapshot: snapshot, data: data)
+        default:
+            throw OracleDecodingError.Code.typeMismatch
+        }
+    }
+}

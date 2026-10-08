@@ -23,6 +23,7 @@ import NIOCore
     import Foundation
 #endif
 
+@available(macOS 13.0, iOS 16.0, *)
 final class ConnectionFactory: Sendable {
 
     struct ConfigCache: Sendable {

@@ -25,7 +25,7 @@ import Testing
         let query: OracleStatement = "DELETE FROM table"
         let queryContext = StatementContext(statement: query, promise: promise)
 
-        let result = StatementResult(value: .noRows(affectedRows: 0, lastRowID: nil))
+        let result = StatementResult(value: .noRows(affectedRows: 0, columns: [], lastRowID: nil))
         let backendError = BackendError(
             number: 0, cursorID: 6, position: 0, rowCount: 0, isWarning: false, message: nil,
             rowID: nil, batchErrors: [])
@@ -273,5 +273,55 @@ import Testing
                     .statementCancelled, read: false, cursorID: nil, clientCancelled: true))
         #expect(state.bitVectorReceived(.init(columnsCountSent: 1, bitVector: [])) == .wait)
         #expect(state.statementStreamCancelled() == .sendMarker(read: true))
+    }
+
+    @Test func connectionErrorWhileStreamingClosesWithoutReplayingTheError() throws {
+        let promise = EmbeddedEventLoop().makePromise(of: OracleRowStream.self)
+        promise.fail(OracleSQLError.uncleanShutdown)  // we don't care about the error at all.
+        let query: OracleStatement = "SELECT 1 AS id FROM dual"
+        let queryContext = StatementContext(statement: query, promise: promise)
+
+        let describeInfo = DescribeInfo(columns: [
+            .init(
+                name: "ID",
+                dataType: .number,
+                dataTypeSize: 0,
+                precision: 11,
+                scale: 0,
+                bufferSize: 22,
+                nullsAllowed: true,
+                typeScheme: nil,
+                typeName: nil,
+                domainSchema: nil,
+                domainName: nil,
+                annotations: [:],
+                vectorDimensions: nil,
+                vectorFormat: nil
+            )
+        ])
+        let rowHeader = OracleBackendMessage.RowHeader()
+        let result = StatementResult(value: .describeInfo(describeInfo.columns))
+
+        var state = ConnectionStateMachine.readyForStatement()
+        #expect(
+            state.enqueue(task: .statement(queryContext))
+                == .sendExecute(queryContext, nil, cursorID: 0, requiresDefine: false, noPrefetch: false)
+        )
+        #expect(state.describeInfoReceived(describeInfo) == .wait)
+        #expect(state.rowHeaderReceived(rowHeader) == .succeedStatement(promise, result))
+        #expect(state.rowDataReceived(.init(1), capabilities: .init()) == .wait)
+
+        // E.g. a message that fails to decode: the row stream gets the error
+        let decodingError = OracleSQLError.connectionError(underlying: ChannelError.badInterfaceAddressFamily)
+        guard case .forwardStreamError(_, _, _, clientCancelled: false) = state.errorHappened(decodingError) else {
+            Issue.record("Expected the stream to get the error")
+            return
+        }
+        // The statement didn't finish, so the connection closes
+        #expect(state.readyForStatementReceived() == .closeConnection(nil))
+        // Closing fires errorCaught again, then the channel goes inactive: the stream, which already
+        // got its error, must not get another one
+        #expect(state.errorHappened(.connectionError(underlying: ChannelError.ioOnClosedChannel)) == .wait)
+        #expect(state.closed() == .fireChannelInactive)
     }
 }

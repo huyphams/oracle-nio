@@ -79,7 +79,11 @@ extension Data: OracleDecodable {
         context: OracleDecodingContext
     ) throws {
         switch type {
-        case .raw, .longRAW:
+        case .raw, .longRAW, .varchar, .char, .long, .nVarchar, .longNVarchar:
+            guard buffer.readableBytes > 0 else {
+                self = Data()
+                return
+            }
             self = buffer.withUnsafeReadableBytesWithStorageManagement { ptr, storageRef in
                 let storage = storageRef.takeUnretainedValue()
                 return Data(

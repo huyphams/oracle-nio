@@ -14,6 +14,7 @@
 
 public import Logging
 
+@available(macOS 13.0, iOS 16.0, tvOS 16.0, watchOS 9.0, *)
 extension OracleClient {
     /// A managed version of ``OracleConnection`` that can only be obtained from an ``OracleClient``.
     ///

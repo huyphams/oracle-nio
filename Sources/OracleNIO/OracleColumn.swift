@@ -18,6 +18,12 @@ public struct OracleColumn: Hashable, Sendable {
 
     /// The field name.
     public var name: String { self.underlying.name }
+
+    /// The Oracle data type name.
+    public var dataTypeName: String { self.underlying.dataType.name }
+
+    /// The data type size.
+    public var dataTypeSize: UInt32 { self.underlying.dataTypeSize }
 }
 
 public struct OracleColumns: Sequence {

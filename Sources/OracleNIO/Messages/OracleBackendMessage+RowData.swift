@@ -255,9 +255,8 @@ extension OracleBackendMessage {
                 }
                 columnValue.writeInteger(0, as: UInt32.self)  // chunk length of zero
             default:
-                fatalError(
-                    "\(String(reflecting: oracleType)) is not implemented, please file a bug report"
-                )
+                columnValue = .init(string: "Unsupported \(String(reflecting: oracleType))")
+                return columnValue
             }
 
             if [.long, .longRAW].contains(oracleType) {

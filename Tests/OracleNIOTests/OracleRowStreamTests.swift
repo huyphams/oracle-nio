@@ -20,7 +20,7 @@ import Testing
 
 @Suite(.timeLimit(.minutes(5))) struct OracleRowStreamTests {
     @Test func emptyStream() {
-        let stream = OracleRowStream(source: .noRows(.success(())))
+        let stream = OracleRowStream(source: .noRows(.success(()), []))
 
         #expect(
             throws: Never.self,
@@ -31,7 +31,7 @@ import Testing
     }
 
     @Test func asyncEmptyStream() async throws {
-        let stream = OracleRowStream(source: .noRows(.success(())))
+        let stream = OracleRowStream(source: .noRows(.success(()), []))
 
         let rows = try await stream.asyncSequence().collect()
         #expect(rows == [])
