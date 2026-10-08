@@ -766,6 +766,11 @@ struct ConnectionStateMachine {
         switch self.state {
         case .statement(let statement):
             guard statement.isComplete else {
+                // A connection error left the statement unfinished (errorHappened doesn't
+                // store the statement's error state). Closing: the close fires errorCaught
+                // again, and the channel goes inactive, which must not replay the
+                // statement's error, e.g. into a row stream that already got it
+                self.state = .closing
                 return .closeConnection(nil)
             }
 
