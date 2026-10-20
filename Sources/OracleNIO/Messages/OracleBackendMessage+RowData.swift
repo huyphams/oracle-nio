@@ -125,7 +125,7 @@ extension OracleBackendMessage {
             switch oracleType {
             case .varchar, .char, .long, .raw, .longRAW, .number, .date, .timestamp,
                 .timestampLTZ, .timestampTZ, .binaryDouble, .binaryFloat,
-                .binaryInteger, .boolean, .intervalDS:
+                .binaryInteger, .boolean, .intervalDS, .intervalYM:
                 switch buffer.readOracleSlice() {
                 case .some(let slice):
                     columnValue = slice
@@ -240,10 +240,12 @@ extension OracleBackendMessage {
                 try buffer.throwingSkipUB2()  // version
                 let dataLength = try buffer.throwingReadUB4()
                 try buffer.throwingSkipUB2()  // flags
-                if dataLength > 0 {
-                    if !buffer.skipRawBytesChunked() {  // data
-                        throw MissingDataDecodingError.Trigger()
-                    }
+                // A NULL object, e.g. a NULL XMLType, has no data
+                if dataLength == 0 {
+                    return ByteBuffer(bytes: [0])  // NULL indicator
+                }
+                if !buffer.skipRawBytesChunked() {  // data
+                    throw MissingDataDecodingError.Trigger()
                 }
                 let endIndex = buffer.readerIndex
                 buffer.moveReaderIndex(to: startIndex)

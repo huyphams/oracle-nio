@@ -70,7 +70,7 @@ extension String: OracleDecodable {
         context: OracleDecodingContext
     ) throws {
         switch type {
-        case .varchar, .char, .long, .nVarchar, .longNVarchar, .longRAW:
+        case .varchar, .char, .long, .nChar, .nVarchar, .longNVarchar, .longRAW:
             if type.csfrm == Constants.TNS_CS_IMPLICIT || type.csfrm == 0 {
                 self = buffer.readString(length: buffer.readableBytes)!
             } else {
