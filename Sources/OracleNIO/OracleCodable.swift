@@ -262,7 +262,7 @@ extension OracleDynamicTypeEncodable {
 public struct OracleEncodingContext: Sendable {
     // Keep @TaskLocal first to avoid a Swift 6.4 macro expansion bug.
     @TaskLocal
-    @usableFromInline static var jsonMaximumFieldNameSize: Int = 255
+    @usableFromInline nonisolated static var jsonMaximumFieldNameSize: Int = 255
 
     @usableFromInline
     init() {}
