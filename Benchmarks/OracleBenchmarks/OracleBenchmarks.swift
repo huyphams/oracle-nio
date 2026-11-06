@@ -342,4 +342,153 @@ let benchmarks: @Sendable () -> Void = {
             }
         }
     }
+
+    // Builds a raw UB-encoded buffer by hand (length byte + value bytes)
+    // rather than going through `writeUB4`/`writeUB8`, since those never
+    // choose the 3-byte length encoding themselves.
+    func ubBuffer(length: UInt8, _ writeValue: (inout ByteBuffer) -> Void) -> ByteBuffer {
+        var buffer = ByteBuffer()
+        buffer.writeInteger(length)
+        writeValue(&buffer)
+        return buffer
+    }
+
+    // One buffer holding many length bytes (high bit alternating), rewound between
+    // passes, so the benchmark measures `readUBLength` itself rather than the
+    // retain/release of copying a `ByteBuffer` for every call.
+    let ubLengthCount = 8192
+    let ubLengthTemplate: ByteBuffer = {
+        var buffer = ByteBuffer()
+        for index in 0..<ubLengthCount {
+            buffer.writeInteger(index.isMultiple(of: 2) ? UInt8(0x02) : UInt8(0x82))
+        }
+        return buffer
+    }()
+
+    Benchmark(
+        "DECODING:UBLENGTH",
+        configuration: .init(warmupIterations: 10)
+    ) { benchmark in
+        var buffer = ubLengthTemplate
+        var sum: UInt = 0
+        for _ in benchmark.scaledIterations {
+            buffer.moveReaderIndex(to: 0)
+            for _ in 0..<ubLengthCount {
+                sum &+= UInt(buffer.readUBLength() ?? 0)
+            }
+        }
+        blackHole(sum)
+    }
+
+    let ub4Templates: [ByteBuffer] = [
+        ubBuffer(length: 0) { _ in },
+        ubBuffer(length: 1) { $0.writeInteger(UInt8(0x7A)) },
+        ubBuffer(length: 2) { $0.writeInteger(UInt16(0x1234)) },
+        ubBuffer(length: 3) {
+            $0.writeInteger(UInt16(0x1234))
+            $0.writeInteger(UInt8(0x56))
+        },
+        ubBuffer(length: 4) { $0.writeInteger(UInt32(0x1234_5678)) },
+    ]
+
+    Benchmark(
+        "DECODING:UB4",
+        configuration: .init(warmupIterations: 10)
+    ) { benchmark in
+        for _ in benchmark.scaledIterations {
+            for _ in 0..<25 {
+                for template in ub4Templates {
+                    var buffer = template
+                    _ = buffer.readUB4()
+                }
+            }
+        }
+    }
+
+    let ub8Templates: [ByteBuffer] =
+        ub4Templates + [
+            ubBuffer(length: 8) { $0.writeInteger(UInt64(0x0102_0304_0506_0708)) }
+        ]
+
+    Benchmark(
+        "DECODING:UB8",
+        configuration: .init(warmupIterations: 10)
+    ) { benchmark in
+        for _ in benchmark.scaledIterations {
+            for _ in 0..<25 {
+                for template in ub8Templates {
+                    var buffer = template
+                    _ = buffer.readUB8()
+                }
+            }
+        }
+    }
+
+    let columnIsEmptyTemplates: [ByteBuffer] = [
+        ByteBuffer(bytes: [0]),
+        ByteBuffer(bytes: [Constants.TNS_NULL_LENGTH_INDICATOR]),
+        ByteBuffer(bytes: [5]),
+    ]
+
+    // NVARCHAR2 columns use the national charset (csfrm 2), which is sent as
+    // big-endian UTF-16 and takes a different decoding path than VARCHAR2.
+    let utf16StringTemplate: ByteBuffer = {
+        var buffer = ByteBuffer()
+        let text = String(repeating: "Hello, Wörld! こんにちは 🌍 ", count: 20)
+        for unit in text.utf16 {
+            buffer.writeInteger(unit)
+        }
+        return buffer
+    }()
+
+    Benchmark(
+        "DECODING:STRING:UTF16",
+        configuration: .init(warmupIterations: 10)
+    ) { benchmark in
+        for _ in benchmark.scaledIterations {
+            for _ in 0..<25 {
+                var buffer = utf16StringTemplate
+                _ = try String(from: &buffer, type: .nVarchar, context: .default)
+            }
+        }
+    }
+
+    // Strings of different lengths cover the uint8 and uint16 length-prefix
+    // branches of the JSON writer.
+    struct BenchmarkJSONStringPayload: Codable {
+        var short: [String]
+        var medium: [String]
+    }
+
+    let jsonStringPayload = OracleJSON(
+        BenchmarkJSONStringPayload(
+            short: (0..<20).map { "short string \($0)" },
+            medium: (0..<20).map { _ in String(repeating: "abcdefghij", count: 30) }
+        )
+    )
+
+    Benchmark(
+        "ENCODING:JSON:STRINGS",
+        configuration: .init(warmupIterations: 10)
+    ) { benchmark in
+        for _ in benchmark.scaledIterations {
+            for _ in 0..<25 {
+                var buffer = ByteBuffer()
+                try jsonStringPayload.encode(into: &buffer, context: .default)
+            }
+        }
+    }
+
+    Benchmark(
+        "DECODING:ORACLE_COLUMN_IS_EMPTY",
+        configuration: .init(warmupIterations: 10)
+    ) { benchmark in
+        for _ in benchmark.scaledIterations {
+            for _ in 0..<25 {
+                for template in columnIsEmptyTemplates {
+                    _ = template.oracleColumnIsEmpty
+                }
+            }
+        }
+    }
 }

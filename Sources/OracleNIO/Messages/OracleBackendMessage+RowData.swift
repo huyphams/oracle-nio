@@ -157,7 +157,7 @@ extension OracleBackendMessage {
                     }
                 }
             case .cursor:
-                buffer.moveReaderIndex(forwardBy: 1)  // length (fixed value)
+                try buffer.throwingMoveReaderIndex(forwardBy: 1)  // length (fixed value)
 
                 let readerIndex = buffer.readerIndex
                 _ = try DescribeInfo._decode(
